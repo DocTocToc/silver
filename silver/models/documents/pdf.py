@@ -15,7 +15,8 @@
 from __future__ import absolute_import
 
 import uuid
-from io import BytesIO, StringIO
+from io import BytesIO
+import cStringIO as StringIO
 
 from xhtml2pdf import pisa
 
@@ -71,7 +72,7 @@ class PDF(Model):
         logger.debug("link_callback: %s", fetch_resources)
         #result = open(context['filename'], "w+b")
         pdf = pisa.pisaDocument(
-            src=html.encode("UTF-8"),
+            src=StringIO.StringIO(html.encode("UTF-8")),
             dest=pdf_file_object,
             encoding='UTF-8',
             link_callback=fetch_resources
