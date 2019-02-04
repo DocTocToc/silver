@@ -66,6 +66,9 @@ class PDF(Model):
         html = template.render(context)
         logger.debug("html: %s", html)
         pdf_file_object = BytesIO()
+        logger.debug('src=html.encode("UTF-8"): %s', html.encode("UTF-8"))
+        logger.debug("dest: %s", pdf_file_object)
+        logger.debug("link_callback: %s", fetch_resources)
         pisa.pisaDocument(
             src=html.encode("UTF-8"),
             dest=pdf_file_object,
