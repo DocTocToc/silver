@@ -33,9 +33,8 @@ from django.utils.encoding import force_bytes
 from silver.utils.pdf import fetch_resources
 
 # addendum
-import logging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+from silver import log
+logger = log.setup_custom_logger("pdf")
 
 
 def get_storage():

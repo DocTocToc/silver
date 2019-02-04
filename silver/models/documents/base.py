@@ -471,12 +471,13 @@ class BillingDocumentBase(models.Model):
         _templates = [provider_state_template, provider_template,
                       generic_state_template, generic_template]
         
-        logger.debug("_templates: %s", _templates)
+        _template_list_str = " | ".join(_templates)
+        logger.debug("_templates: %s", _template_list_str)
 
         templates = []
         for t in _templates:
             templates.append('billing_documents/' + t)
-        template_list_str = "".join(_templates)
+        template_list_str = " | ".join(templates)
         logger.debug("templates list: %s", template_list_str)
         return select_template(templates)
 
