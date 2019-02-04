@@ -76,16 +76,13 @@ class PDF(Model):
             encoding='UTF-8',
             link_callback=fetch_resources
         )
-
-        if not pdf_file_object:
-            return
-
+        pdf_content = ContentFile(resultFile)
         if upload:
-            self.upload(
-                pdf_file_object=resultFile,
-                filename=context['filename']
-            )
-        return pdf_file_object
+            with transaction.atomic():
+                self.pdf_file.save(context['filename'], pdf_content, True)
+                self.mark_as_clean()
+        resultFile.close() 
+        return
 
     def upload(self, pdf_file_object, filename):
         # the PDF's upload_path attribute needs to be set before calling this method
