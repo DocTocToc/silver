@@ -35,6 +35,7 @@ from silver.utils.pdf import fetch_resources
 # addendum
 import logging
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 def get_storage():
