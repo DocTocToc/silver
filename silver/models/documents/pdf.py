@@ -71,7 +71,7 @@ class PDF(Model):
         logger.debug("link_callback: %s", fetch_resources)
         #result = open(context['filename'], "w+b")
         pdf = pisa.pisaDocument(
-            src=StringIO(html.encode("UTF-8")),
+            src=html.encode("UTF-8"),
             dest=pdf_file_object,
             encoding='UTF-8',
             link_callback=fetch_resources
