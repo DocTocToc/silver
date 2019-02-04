@@ -45,6 +45,9 @@ from silver.models.documents.entries import DocumentEntry
 from silver.models.documents.pdf import PDF
 from silver.utils.international import currencies
 
+from silver import log
+logger = log.setup_custom_logger("base")
+
 
 _storage = getattr(settings, 'SILVER_DOCUMENT_STORAGE', None)
 if _storage:
@@ -53,8 +56,7 @@ if _storage:
 
 PAYMENT_DUE_DAYS = getattr(settings, 'SILVER_DEFAULT_DUE_DAYS', 5)
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+
 
 
 def documents_pdf_path(document, filename):
