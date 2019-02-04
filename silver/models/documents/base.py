@@ -455,19 +455,26 @@ class BillingDocumentBase(models.Model):
     def get_template(self, state=None):
         provider_state_template = '{provider}/{kind}_{state}_pdf.html'.format(
             kind=self.kind, provider=self.provider.slug, state=state).lower()
+        logger.debug("provider_state_template: %s", provider_state_template)    
         provider_template = '{provider}/{kind}_pdf.html'.format(
             kind=self.kind, provider=self.provider.slug).lower()
+        logger.debug("provider_template: %s", provider_template)    
         generic_state_template = '{kind}_{state}_pdf.html'.format(
             kind=self.kind, state=state).lower()
+        logger.debug("generic_state_template: %s", generic_state_template)
         generic_template = '{kind}_pdf.html'.format(
             kind=self.kind).lower()
+        logger.debug("generic_template: %s", generic_template)
         _templates = [provider_state_template, provider_template,
                       generic_state_template, generic_template]
+        
+        logger.debug("_templates: %s", _templates)
 
         templates = []
         for t in _templates:
             templates.append('billing_documents/' + t)
-
+        template_list_str = "".join(_templates)
+        logger.debug("templates list: %s", template_list_str)
         return select_template(templates)
 
     def get_pdf_filename(self):

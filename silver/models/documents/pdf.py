@@ -32,6 +32,10 @@ from django.utils.encoding import force_bytes
 
 from silver.utils.pdf import fetch_resources
 
+# addendum
+import logging
+logger = logging.getLogger(__name__)
+
 
 def get_storage():
     storage_settings = getattr(settings, 'SILVER_DOCUMENT_STORAGE', None)
@@ -58,6 +62,7 @@ class PDF(Model):
         return self.pdf_file.url if self.pdf_file else None
 
     def generate(self, template, context, upload=True):
+        logger.debug("template: %s", template)
         html = template.render(context)
         pdf_file_object = BytesIO()
         pisa.pisaDocument(
