@@ -69,20 +69,21 @@ class PDF(Model):
         logger.debug('src=html.encode("UTF-8"): %s', html.encode("UTF-8"))
         logger.debug("dest: %s", pdf_file_object)
         logger.debug("link_callback: %s", fetch_resources)
-        resultFile = open(context['filename'], "w+b")
-        pisa.CreatePDF(
-            src=html.encode("UTF-8"),
-            dest=resultFile,
+        #result = open(context['filename'], "w+b")
+        pdf = pisa.pisaDocument(
+            src=BytesIO(html.encode("UTF-8")),
+            dest=pdf_file_object,
             encoding='UTF-8',
             link_callback=fetch_resources
         )
-        pdf_content = ContentFile(resultFile)
-        if upload:
-            with transaction.atomic():
-                self.pdf_file.save(context['filename'], pdf_content, True)
-                self.mark_as_clean()
-        resultFile.close() 
-        return
+        
+        if not pdf.err:
+            if upload:
+                self.upload(
+                    pdf_file_object=force_bytes(pdf_file_object),
+                    filename=context['filename']
+                )
+        return None
 
     def upload(self, pdf_file_object, filename):
         # the PDF's upload_path attribute needs to be set before calling this method
