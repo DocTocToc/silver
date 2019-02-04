@@ -69,7 +69,7 @@ class PDF(Model):
         logger.debug('src=html.encode("UTF-8"): %s', html.encode("UTF-8"))
         logger.debug("dest: %s", pdf_file_object)
         logger.debug("link_callback: %s", fetch_resources)
-        pisa.pisaDocument(
+        pisa.CreatePDF(
             src=html.encode("UTF-8"),
             dest=pdf_file_object,
             encoding='UTF-8',
