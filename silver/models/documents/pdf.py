@@ -64,6 +64,7 @@ class PDF(Model):
     def generate(self, template, context, upload=True):
         logger.debug("template: %s", template)
         html = template.render(context)
+        logger.debug("html: %s", html)
         pdf_file_object = BytesIO()
         pisa.pisaDocument(
             src=html.encode("UTF-8"),
