@@ -15,7 +15,7 @@
 from __future__ import absolute_import
 
 import uuid
-from io import BytesIO
+from io import BytesIO, StringIO
 
 from xhtml2pdf import pisa
 
@@ -65,13 +65,13 @@ class PDF(Model):
         logger.debug("template: %s", template)
         html = template.render(context)
         logger.debug("html: %s", html)
-        pdf_file_object = BytesIO()
+        pdf_file_object = StringIO()
         logger.debug('src=html.encode("UTF-8"): %s', html.encode("UTF-8"))
         logger.debug("dest: %s", pdf_file_object)
         logger.debug("link_callback: %s", fetch_resources)
         #result = open(context['filename'], "w+b")
         pdf = pisa.pisaDocument(
-            src=BytesIO(html.encode("UTF-8")),
+            src=StringIO(html.encode("UTF-8")),
             dest=pdf_file_object,
             encoding='UTF-8',
             link_callback=fetch_resources
@@ -80,15 +80,18 @@ class PDF(Model):
         if not pdf.err:
             if upload:
                 self.upload(
-                    pdf_file_object=force_bytes(pdf_file_object),
+                    pdf_file_object=pdf_file_object,
                     filename=context['filename']
                 )
+        else:
+            logger.debug(pdf.err)
+            
         return None
 
     def upload(self, pdf_file_object, filename):
         # the PDF's upload_path attribute needs to be set before calling this method
 
-        pdf_content = ContentFile(pdf_file_object)
+        pdf_content = pdf_file_object
 
         with transaction.atomic():
             self.pdf_file.save(filename, pdf_content, True)
