@@ -69,9 +69,10 @@ class PDF(Model):
         logger.debug('src=html.encode("UTF-8"): %s', html.encode("UTF-8"))
         logger.debug("dest: %s", pdf_file_object)
         logger.debug("link_callback: %s", fetch_resources)
+        resultFile = open(context['filename'], "w+b")
         pisa.CreatePDF(
             src=html.encode("UTF-8"),
-            dest=pdf_file_object,
+            dest=resultFile,
             encoding='UTF-8',
             link_callback=fetch_resources
         )
@@ -81,7 +82,7 @@ class PDF(Model):
 
         if upload:
             self.upload(
-                pdf_file_object=force_bytes(pdf_file_object),
+                pdf_file_object=resultFile,
                 filename=context['filename']
             )
         return pdf_file_object
