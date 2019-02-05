@@ -72,7 +72,8 @@ class PDF(Model):
         logger.debug("link_callback: %s", fetch_resources)
         #result = open(context['filename'], "w+b")
         pdf = pisa.pisaDocument(
-            src=StringIO.StringIO(html.encode("UTF-8")),
+            #src=StringIO.StringIO(html.encode("UTF-8")),
+            src=BytesIO(html.encode("UTF-8")),
             dest=pdf_file_object,
             encoding='UTF-8',
             link_callback=fetch_resources
@@ -91,11 +92,8 @@ class PDF(Model):
 
     def upload(self, pdf_file_object, filename):
         # the PDF's upload_path attribute needs to be set before calling this method
-
-        pdf_content = pdf_file_object
-
         with transaction.atomic():
-            self.pdf_file.save(filename, pdf_content, True)
+            self.pdf_file.save(filename, pdf_file_object, True)
             self.mark_as_clean()
 
     def mark_as_dirty(self):
