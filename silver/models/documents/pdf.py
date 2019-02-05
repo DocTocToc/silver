@@ -14,24 +14,23 @@
 
 from __future__ import absolute_import
 
+import logging
 import uuid
 from io import BytesIO
 
 from xhtml2pdf import pisa
 
 from django.conf import settings
-from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import (
     Model, FileField, TextField, UUIDField, PositiveIntegerField, F
 )
 from django.db.models.functions import Greatest
-from django.http import HttpResponse
 from django.utils.module_loading import import_string
-from django.utils.encoding import force_bytes
 
 from silver.utils.pdf import fetch_resources
 
+logger = logging.getLogger(__name__)
 
 def get_storage():
     storage_settings = getattr(settings, 'SILVER_DOCUMENT_STORAGE', None)
@@ -60,30 +59,31 @@ class PDF(Model):
     def generate(self, template, context, upload=True):
         html = template.render(context)
         pdf_file_object = BytesIO()
-        pisa.pisaDocument(
-            src=html.encode("UTF-8"),
+        pisa_status = pisa.pisaDocument(
+            src=BytesIO(html.encode("UTF-8")),
             dest=pdf_file_object,
             encoding='UTF-8',
             link_callback=fetch_resources
         )
-
-        if not pdf_file_object:
-            return
-
-        if upload:
-            self.upload(
-                pdf_file_object=force_bytes(pdf_file_object),
-                filename=context['filename']
+        if not pisa_status.err:
+            if upload:
+                self.upload(
+                    pdf_file_object=pdf_file_object,
+                    filename=context['filename']
+                )
+        else:
+            logger.error(
+                'xhtml2pdf encountered exception during generation of pdf %s: %s',
+                context['filename'],
+                pisa_status.err
             )
+            
         return pdf_file_object
 
     def upload(self, pdf_file_object, filename):
         # the PDF's upload_path attribute needs to be set before calling this method
-
-        pdf_content = ContentFile(pdf_file_object)
-
         with transaction.atomic():
-            self.pdf_file.save(filename, pdf_content, True)
+            self.pdf_file.save(filename, pdf_file_object, True)
             self.mark_as_clean()
 
     def mark_as_dirty(self):
