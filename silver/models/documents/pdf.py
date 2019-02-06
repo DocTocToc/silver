@@ -27,6 +27,7 @@ from django.db.models import (
 )
 from django.db.models.functions import Greatest
 from django.utils.module_loading import import_string
+from django.core.files import File
 
 from silver.utils.pdf import fetch_resources
 
@@ -65,25 +66,28 @@ class PDF(Model):
             encoding='UTF-8',
             link_callback=fetch_resources
         )
-        if not pisa_status.err:
-            if upload:
-                self.upload(
-                    pdf_file_object=pdf_file_object,
-                    filename=context['filename']
-                )
-        else:
+        
+        if pisa_status.err:
             logger.error(
                 'xhtml2pdf encountered exception during generation of pdf %s: %s',
                 context['filename'],
                 pisa_status.err
             )
-            
+            return
+        
+        if upload:
+            self.upload(
+                pdf_file_object=pdf_file_object,
+                filename=context['filename']
+            )
+        
         return pdf_file_object
 
     def upload(self, pdf_file_object, filename):
         # the PDF's upload_path attribute needs to be set before calling this method
+        django_file = File(pdf_file_object)
         with transaction.atomic():
-            self.pdf_file.save(filename, pdf_file_object, True)
+            self.pdf_file.save(filename, django_file, True)
             self.mark_as_clean()
 
     def mark_as_dirty(self):
