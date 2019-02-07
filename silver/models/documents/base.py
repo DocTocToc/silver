@@ -38,7 +38,7 @@ from django.utils.encoding import python_2_unicode_compatible, force_text
 from django.utils.text import slugify
 from django.utils.translation import ugettext_lazy as _
 from django.utils.module_loading import import_string
-from django.utils.formats import localize
+from django.utils.formats import localize_input
 
 from silver.currencies import CurrencyConverter, RateNotFound
 from silver.models.billing_entities import Customer, Provider
@@ -445,7 +445,7 @@ class BillingDocumentBase(models.Model):
         if state is None:
             state = self.state
 
-        issue_date = localize(self.issue_date, use_l10n=True)
+        issue_date = localize_input(self.issue_date, use_l10n=True)
 
         return {
             'document': self,
