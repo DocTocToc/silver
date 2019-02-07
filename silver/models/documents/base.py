@@ -489,7 +489,7 @@ class BillingDocumentBase(models.Model):
             'filename': self.get_pdf_filename(),
             'provider': self.provider.slug,
             'customer': self.customer.slug,
-            'issue_date': self.issue_date.strftime('%Y/%m/%d')
+            'issue_date': self.issue_date,
         }
 
         return path_template.format(**context)
