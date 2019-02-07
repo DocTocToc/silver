@@ -446,7 +446,7 @@ class BillingDocumentBase(models.Model):
             state = self.state
 
         issue_date = localize_input(self.issue_date, default="%d %B %Y")
-        issue_date2 = date_format(self.issue_date, format="%d %B %Y")
+        issue_date2 = date_format(self.issue_date, format="D d M Y")
 
 
         return {
