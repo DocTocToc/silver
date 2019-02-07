@@ -445,6 +445,8 @@ class BillingDocumentBase(models.Model):
         if state is None:
             state = self.state
 
+        issue_date = localize(self.issue_date, use_l10n=True)
+
         return {
             'document': self,
             'provider': provider,
@@ -452,7 +454,7 @@ class BillingDocumentBase(models.Model):
             'entries': self._entries,
             'state': state,
             'LANGUAGE_CODE': 'fr',
-            'issue_date': localize(self.issue_date, use_l10n=True)
+            'issue_date': issue_date,
         }
 
     def get_template(self, state=None):
