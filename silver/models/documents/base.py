@@ -449,7 +449,8 @@ class BillingDocumentBase(models.Model):
             'provider': provider,
             'customer': customer,
             'entries': self._entries,
-            'state': state
+            'state': state,
+            'LANGUAGE_CODE': 'fr',
         }
 
     def get_template(self, state=None):
