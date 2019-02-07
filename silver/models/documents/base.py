@@ -445,7 +445,7 @@ class BillingDocumentBase(models.Model):
         if state is None:
             state = self.state
 
-        issue_date = localize_input(self.issue_date, default="%x")
+        issue_date = localize_input(self.issue_date, default="%d %B %Y")
 
         return {
             'document': self,
