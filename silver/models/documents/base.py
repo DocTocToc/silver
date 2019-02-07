@@ -38,6 +38,7 @@ from django.utils.encoding import python_2_unicode_compatible, force_text
 from django.utils.text import slugify
 from django.utils.translation import ugettext_lazy as _
 from django.utils.module_loading import import_string
+from django.utils.formats import localize
 
 from silver.currencies import CurrencyConverter, RateNotFound
 from silver.models.billing_entities import Customer, Provider
@@ -451,6 +452,7 @@ class BillingDocumentBase(models.Model):
             'entries': self._entries,
             'state': state,
             'LANGUAGE_CODE': 'fr',
+            'issue_date': localize(self.issue_date, use_l10n=True)
         }
 
     def get_template(self, state=None):
@@ -484,12 +486,14 @@ class BillingDocumentBase(models.Model):
             'documents/{provider}/{doc.kind}/{issue_date}/{filename}'
         )
 
+        issue_date = localize(self.issue_date, use_l10n=None)
+         
         context = {
             'doc': self,
             'filename': self.get_pdf_filename(),
             'provider': self.provider.slug,
             'customer': self.customer.slug,
-            'issue_date': self.issue_date,
+            'issue_date': self.issue_date.strftime('%Y/%m/%d')
         }
 
         return path_template.format(**context)
