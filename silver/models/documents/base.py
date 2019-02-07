@@ -38,7 +38,7 @@ from django.utils.encoding import python_2_unicode_compatible, force_text
 from django.utils.text import slugify
 from django.utils.translation import ugettext_lazy as _
 from django.utils.module_loading import import_string
-from django.utils.formats import localize_input
+from django.utils.formats import localize_input, date_format
 
 from silver.currencies import CurrencyConverter, RateNotFound
 from silver.models.billing_entities import Customer, Provider
@@ -446,6 +446,8 @@ class BillingDocumentBase(models.Model):
             state = self.state
 
         issue_date = localize_input(self.issue_date, default="%d %B %Y")
+        issue_date2 = date_format(self.issue_date, format="%d %B %Y")
+
 
         return {
             'document': self,
@@ -455,6 +457,7 @@ class BillingDocumentBase(models.Model):
             'state': state,
             'LANGUAGE_CODE': settings.LANGUAGE_CODE,
             'issue_date': issue_date,
+            'issue_date2': issue_date2,
         }
 
     def get_template(self, state=None):
