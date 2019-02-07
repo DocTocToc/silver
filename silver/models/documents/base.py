@@ -453,7 +453,7 @@ class BillingDocumentBase(models.Model):
             'customer': customer,
             'entries': self._entries,
             'state': state,
-            'LANGUAGE_CODE': 'fr',
+            'LANGUAGE_CODE': settings.LANGUAGE_CODE,
             'issue_date': issue_date,
         }
 
@@ -488,8 +488,6 @@ class BillingDocumentBase(models.Model):
             'documents/{provider}/{doc.kind}/{issue_date}/{filename}'
         )
 
-        issue_date = localize(self.issue_date, use_l10n=None)
-         
         context = {
             'doc': self,
             'filename': self.get_pdf_filename(),
