@@ -31,6 +31,7 @@ from silver.api.serializers.documents_serializers import (
     InvoiceSerializer, DocumentEntrySerializer, ProformaSerializer, DocumentSerializer
 )
 from silver.models import Invoice, BillingDocumentBase, DocumentEntry, Proforma, PDF
+from silver.tasks import generate_pdf
 
 
 class InvoiceListCreate(generics.ListCreateAPIView):
@@ -204,6 +205,7 @@ class InvoiceStateHandler(APIView):
 
             paid_date = request.data.get('paid_date', None)
             invoice.pay(paid_date)
+            generate_pdf.delay(invoice_pk, 'invoice')
         elif state == Invoice.STATES.CANCELED:
             if invoice.state != Invoice.STATES.ISSUED:
                 msg = "An invoice can be canceled only if it is in issued " \
