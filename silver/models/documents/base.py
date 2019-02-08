@@ -447,8 +447,8 @@ class BillingDocumentBase(models.Model):
             state = self.state
         
         translation.activate(settings.LANGUAGE_CODE)
-        issue_date = localize_input(self.issue_date, default="%d %B %Y")
-        issue_date2 = date_format(self.issue_date, format="D d M Y")
+        #issue_date = localize_input(self.issue_date, default="%d %B %Y")
+        #issue_date2 = date_format(self.issue_date, format="D d M Y")
         translation.deactivate()
 
 
@@ -459,8 +459,8 @@ class BillingDocumentBase(models.Model):
             'entries': self._entries,
             'state': state,
             'LANGUAGE_CODE': settings.LANGUAGE_CODE,
-            'issue_date': issue_date,
-            'issue_date2': issue_date2,
+            #'issue_date': issue_date,
+            #'issue_date2': issue_date2,
         }
 
     def get_template(self, state=None):
