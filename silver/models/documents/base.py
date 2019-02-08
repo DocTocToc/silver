@@ -33,7 +33,7 @@ from django.db import models
 from django.db import transaction as db_transaction
 from django.db.models import Max, ForeignKey, F
 from django.template.loader import select_template
-from django.utils import timezone
+from django.utils import timezone, translation
 from django.utils.encoding import python_2_unicode_compatible, force_text
 from django.utils.text import slugify
 from django.utils.translation import ugettext_lazy as _
@@ -443,6 +443,9 @@ class BillingDocumentBase(models.Model):
         provider = Provider(**self.archived_provider)
         if state is None:
             state = self.state
+
+        if settings.USE_I18N:
+            translation.activate(settings.LANGUAGE_CODE)
 
         return {
             'document': self,
