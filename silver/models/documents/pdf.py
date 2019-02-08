@@ -33,6 +33,7 @@ from silver.utils.pdf import fetch_resources
 
 logger = logging.getLogger(__name__)
 
+
 def get_storage():
     storage_settings = getattr(settings, 'SILVER_DOCUMENT_STORAGE', None)
     if not storage_settings:
@@ -66,7 +67,7 @@ class PDF(Model):
             encoding='UTF-8',
             link_callback=fetch_resources
         )
-        
+
         if pisa_status.err:
             logger.error(
                 'xhtml2pdf encountered exception during generation of pdf %s: %s',
@@ -74,13 +75,13 @@ class PDF(Model):
                 pisa_status.err
             )
             return
-        
+
         if upload:
             self.upload(
                 pdf_file_object=pdf_file_object,
                 filename=context['filename']
             )
-        
+
         return pdf_file_object
 
     def upload(self, pdf_file_object, filename):
