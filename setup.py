@@ -62,7 +62,7 @@ def read(fname):
 
 setup(
     name="django-silver",
-    version='0.7.0',
+    version='0.10.1',
     description=read('DESCRIPTION'),
     long_description=read('README.rst'),
     license='Apache 2.0',
@@ -77,14 +77,15 @@ setup(
     },
     include_package_data=True,
     install_requires=install_requires,
-    dependency_links=[
-        'https://github.com/xhtml2pdf/xhtml2pdf/archive/32a5006bb02a95d7dcfaaf46bc4e0f60520bb8e9.zip#egg=xhtml2pdf'
-    ],
     classifiers=[
         'Environment :: Web Environment',
         'Framework :: Django :: 1.11',
+        'Framework :: Django :: 2.1',
+        'Framework :: Django :: 2.2',
         'Development Status :: 5 - Production/Stable',
         'License :: OSI Approved :: Apache Software License',
-        'Programming Language :: Python :: 2.7'
+        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6'
     ]
 )

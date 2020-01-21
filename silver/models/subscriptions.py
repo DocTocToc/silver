@@ -63,8 +63,10 @@ def field_template_path(field, provider=None):
 
 @python_2_unicode_compatible
 class MeteredFeatureUnitsLog(models.Model):
-    metered_feature = models.ForeignKey('MeteredFeature', related_name='consumed')
-    subscription = models.ForeignKey('Subscription', related_name='mf_log_entries')
+    metered_feature = models.ForeignKey('MeteredFeature', related_name='consumed',
+                                        on_delete=models.CASCADE)
+    subscription = models.ForeignKey('Subscription', related_name='mf_log_entries',
+                                     on_delete=models.CASCADE)
     consumed_units = models.DecimalField(max_digits=19, decimal_places=4,
                                          validators=[MinValueValidator(0.0)])
     start_date = models.DateField(editable=False)
@@ -146,12 +148,12 @@ class Subscription(models.Model):
     }
 
     plan = models.ForeignKey(
-        'Plan',
+        'Plan', on_delete=models.CASCADE,
         help_text='The plan the customer is subscribed to.'
     )
     description = models.CharField(max_length=1024, blank=True, null=True)
     customer = models.ForeignKey(
-        'Customer', related_name='subscriptions',
+        'Customer', related_name='subscriptions', on_delete=models.CASCADE,
         help_text='The customer who is subscribed to the plan.'
     )
     trial_end = models.DateField(
@@ -177,7 +179,7 @@ class Subscription(models.Model):
     )
     state = FSMField(
         choices=STATE_CHOICES, max_length=12, default=STATES.INACTIVE,
-        protected=True, help_text='The state the subscription is in.'
+        help_text='The state the subscription is in.'
     )
     meta = JSONField(blank=True, null=True, default={})
 
@@ -733,17 +735,19 @@ class Subscription(models.Model):
                 metered_feature, consumed_units)
         else:
             # It's still on trial but has been billed before
-            # The following part tries so handle the case when the trial
+            # The following part tries to handle the case when the trial
             # spans over 2 months and the subscription has been already billed
             # once => this month it is still on trial but it only
             # has remaining = consumed_last_cycle - included_during_trial
             last_log_entry = self.billing_logs.all()[0]
-            if last_log_entry.proforma:
+            if last_log_entry.invoice:
+                qs = last_log_entry.invoice.invoice_entries.filter(
+                    product_code=metered_feature.product_code)
+            elif last_log_entry.proforma:
                 qs = last_log_entry.proforma.proforma_entries.filter(
                     product_code=metered_feature.product_code)
             else:
-                qs = last_log_entry.invoice.invoice_entries.filter(
-                    product_code=metered_feature.product_code)
+                qs = DocumentEntry.objects.none()
 
             if not qs.exists():
                 return self._get_consumed_units_from_total_included_in_trial(
@@ -1008,19 +1012,19 @@ class Subscription(models.Model):
         return base_context
 
     def __str__(self):
-        return u'%s (%s)' % (self.customer, self.plan)
+        return u'%s (%s)' % (self.customer, self.plan.name)
 
 
 @python_2_unicode_compatible
 class BillingLog(models.Model):
-    subscription = models.ForeignKey('Subscription',
+    subscription = models.ForeignKey('Subscription', on_delete=models.CASCADE,
                                      related_name='billing_logs')
     invoice = models.ForeignKey('BillingDocumentBase', null=True, blank=True,
-                                related_name='invoice_billing_logs')
+                                on_delete=models.SET_NULL, related_name='invoice_billing_logs')
     proforma = models.ForeignKey('BillingDocumentBase', null=True, blank=True,
-                                 related_name='proforma_billing_logs')
+                                 on_delete=models.SET_NULL, related_name='proforma_billing_logs')
     billing_date = models.DateField(
-        help_text="The date when the invoice/proforma was issued."
+        help_text="The date when the invoice/proforma was generated."
     )
     plan_billed_up_to = models.DateField(
         help_text="The date up to which the plan base amount has been billed."

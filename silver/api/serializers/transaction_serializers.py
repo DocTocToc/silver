@@ -17,15 +17,17 @@ from __future__ import absolute_import
 import jwt
 
 from django.conf import settings
-from django.core.exceptions import ValidationError, NON_FIELD_ERRORS
+from django.core.exceptions import ValidationError, NON_FIELD_ERRORS as DJANGO_NON_FIELD_ERRORS
 
 from rest_framework import serializers
+from rest_framework.settings import api_settings
 
 from silver.api.serializers.billing_entities_serializers import ProviderUrl
 from silver.api.serializers.common import CustomerUrl
 from silver.api.serializers.payment_methods_serializers import PaymentMethodUrl
 from silver.models import PaymentMethod, Transaction
 from silver.utils.payments import get_payment_url
+from silver.utils.serializers import AutoCleanSerializerMixin
 
 
 class TransactionUrl(serializers.HyperlinkedIdentityField):
@@ -54,7 +56,8 @@ class TransactionPaymentUrl(serializers.HyperlinkedIdentityField):
             return None
 
 
-class TransactionSerializer(serializers.HyperlinkedModelSerializer):
+class TransactionSerializer(AutoCleanSerializerMixin,
+                            serializers.HyperlinkedModelSerializer):
     payment_method = PaymentMethodUrl(view_name='payment-method-detail',
                                       lookup_field='payment_method',
                                       queryset=PaymentMethod.objects.all())
@@ -64,8 +67,8 @@ class TransactionSerializer(serializers.HyperlinkedModelSerializer):
     customer = CustomerUrl(view_name='customer-detail', read_only=True)
     provider = ProviderUrl(view_name='provider-detail', read_only=True)
     id = serializers.CharField(source='uuid', read_only=True)
-    amount = serializers.DecimalField(required=False, decimal_places=2,
-                                      max_digits=12, min_value=0)
+    amount = serializers.DecimalField(required=False, max_digits=12, decimal_places=2, min_value=0,
+                                      coerce_to_string=True)
 
     class Meta:
         model = Transaction
@@ -96,40 +99,5 @@ class TransactionSerializer(serializers.HyperlinkedModelSerializer):
                 message = "The transaction cannot be modified once it is in {}"\
                           " state.".format(self.instance.state)
                 raise serializers.ValidationError(message)
-
-        # Run model clean and handle ValidationErrors
-        try:
-            # Use the existing instance to avoid unique field errors
-            if self.instance:
-                transaction = self.instance
-                transaction_dict = transaction.__dict__.copy()
-
-                errors = {}
-                for attribute, value in attrs.items():
-                    if attribute in self.Meta.updateable_fields:
-                        continue
-
-                    if getattr(transaction, attribute) != value:
-                        errors[attribute] = "This field may not be modified."
-                    setattr(transaction, attribute, value)
-
-                if errors:
-                    raise serializers.ValidationError(errors)
-
-                transaction.full_clean()
-
-                # Revert changes to existing instance
-                transaction.__dict__ = transaction_dict
-            else:
-                transaction = Transaction(**attrs)
-                transaction.full_clean()
-        except ValidationError as e:
-            errors = e.error_dict
-            non_field_errors = errors.pop(NON_FIELD_ERRORS, None)
-            if non_field_errors:
-                errors['non_field_errors'] = [
-                    error for sublist in non_field_errors for error in sublist
-                ]
-            raise serializers.ValidationError(errors)
 
         return attrs

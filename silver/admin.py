@@ -17,13 +17,15 @@ from __future__ import absolute_import, unicode_literals
 import errno
 import logging
 import os
-import requests
-from six.moves import map
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
+from datetime import date
+from decimal import Decimal
 
+import requests
 from PyPDF2 import PdfFileReader, PdfFileMerger
 from dal import autocomplete
 from django_fsm import TransitionNotAllowed
+from furl import furl
 
 from django import forms
 from django.contrib import messages
@@ -33,17 +35,17 @@ from django.contrib.admin import (
 from django.contrib.admin.actions import delete_selected as delete_selected_
 from django.contrib.admin.models import LogEntry, CHANGE
 from django.contrib.contenttypes.models import ContentType
-from django.core import urlresolvers
 from django.core.exceptions import ValidationError
-from django.core.urlresolvers import reverse
-from django.db import connections
-from django.db.models import BLANK_CHOICE_DASH
+from django.db.models import BLANK_CHOICE_DASH, F, Value, fields
+from django.db.models.functions import ExtractYear, ExtractMonth, Concat
 from django.forms import ChoiceField
 from django.http import HttpResponse
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.encoding import force_text
-from django.utils.html import escape
+from django.utils.html import escape, conditional_escape
+from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext_lazy as _
 
 from silver.documents_generator import DocumentsGenerator
@@ -56,7 +58,6 @@ from silver.models import (
 from silver.payment_processors.mixins import PaymentProcessorTypes
 from silver.utils.international import currencies
 from silver.utils.payments import get_payment_url
-
 
 logger = logging.getLogger('silver')
 
@@ -118,7 +119,7 @@ class PlanForm(forms.ModelForm):
 
 
 class PlanAdmin(ModelAdmin):
-    list_display = ['name', 'description', 'interval_display',
+    list_display = ['name', 'get_provider', 'description', 'interval_display',
                     'trial_period_days', 'enabled', 'private']
     search_fields = ['name']
     list_filter = ['provider']
@@ -128,6 +129,7 @@ class PlanAdmin(ModelAdmin):
         return ('{:d} {}s'.format(obj.interval_count, obj.interval)
                 if obj.interval_count != 1
                 else '{:d} {}'.format(obj.interval_count, obj.interval))
+
     interval_display.short_description = 'Interval'
 
     def description(self, obj):
@@ -144,13 +146,26 @@ class PlanAdmin(ModelAdmin):
                 d += u'<code> ({:.2f} included)</code>'.format(f.included_units)
             d += u'<br>'
         return d
+
     description.allow_tags = True
+
+    def get_provider(self, obj):
+        return obj.provider.admin_change_url
+
+    get_provider.allow_tags = True
+    get_provider.short_description = "provider"
+    get_provider.admin_order_field = "provider"
+
+    def get_queryset(self, request):
+        return super(PlanAdmin, self).get_queryset(request) \
+            .prefetch_related("metered_features") \
+            .select_related("provider")
 
 
 class MeteredFeatureUnitsLogInLine(TabularInline):
     model = MeteredFeatureUnitsLog
     list_display = ['metered_feature']
-    readonly_fields = ('start_date', 'end_date', )
+    readonly_fields = ('start_date', 'end_date',)
     extra = 0
 
     def get_formset(self, request, obj=None, **kwargs):
@@ -185,28 +200,71 @@ class BillingLogInLine(TabularInline):
 
     def invoice_link(self, obj):
         return obj.invoice.admin_change_url if obj.invoice else 'None'
+
     invoice_link.short_description = 'Invoice'
     invoice_link.allow_tags = True
 
     def proforma_link(self, obj):
         return obj.proforma.admin_change_url if obj.proforma else 'None'
+
     proforma_link.short_description = 'Proforma'
     proforma_link.allow_tags = True
 
 
+class SubscriptionForm(forms.ModelForm):
+    class Meta:
+        model = Subscription
+        exclude = []
+        readonly_fields = ['state', ]
+
+        widgets = {
+            'plan': autocomplete.ModelSelect2(
+                url='autocomplete-plan'
+            ),
+            'customer': autocomplete.ModelSelect2(
+                url='autocomplete-customer'
+            ),
+        }
+
+
+class PlanFilter(SimpleListFilter):
+    title = _('plan')
+    parameter_name = 'plan'
+
+    def lookups(self, request, model_admin):
+        queryset = model_admin.get_queryset(request).distinct() \
+            .annotate(
+                _name_provider=Concat(
+                    F('plan__name'), Value(' ('), F('plan__provider__name'), Value(')'),
+                    output_field=fields.CharField()
+                ),
+        ) \
+            .values_list('id', '_name_provider') \
+            .distinct()
+
+        return list(queryset)
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(invoice__exact=self.value())
+        return queryset
+
+
 class SubscriptionAdmin(ModelAdmin):
-    list_display = ['customer', 'plan', 'last_billing_date', 'trial_end',
+    list_display = ['customer', 'get_plan_name', 'last_billing_date', 'trial_end',
                     'start_date', 'ended_at', 'state', metadata]
-    list_filter = ['plan', 'state', 'plan__provider', 'customer']
-    readonly_fields = ['state', ]
+    list_filter = [PlanFilter, 'state', 'plan__provider', 'customer']
     actions = ['activate', 'cancel_now', 'cancel_at_end_of_cycle', 'end']
     search_fields = ['customer__first_name', 'customer__last_name',
                      'customer__company', 'plan__name', 'meta']
+    readonly_fields = ['state']
     inlines = [MeteredFeatureUnitsLogInLine, BillingLogInLine]
+    form = SubscriptionForm
 
     def get_queryset(self, request):
         return super(SubscriptionAdmin, self).get_queryset(request) \
-                                             .prefetch_related('billing_logs')
+                                             .prefetch_related('billing_logs') \
+                                             .select_related('plan')
 
     def perform_action(self, request, action, queryset):
         try:
@@ -248,26 +306,37 @@ class SubscriptionAdmin(ModelAdmin):
 
     def activate(self, request, queryset):
         self.perform_action(request, 'activate', queryset)
+
     activate.short_description = 'Activate the selected Subscription(s) '
 
     def reactivate(self, request, queryset):
         # NOTE: deactivated for now
         self.perform_action(request, 'reactivate', queryset)
+
     reactivate.short_description = 'Reactivate the selected Subscription(s) '
 
     def cancel_now(self, request, queryset):
         self.perform_action(request, '_cancel_now', queryset)
+
     cancel_now.short_description = 'Cancel the selected Subscription(s) now'
 
     def cancel_at_end_of_cycle(self, request, queryset):
         self.perform_action(request, '_cancel_at_end_of_billing_cycle', queryset)
-    cancel_at_end_of_cycle.short_description = 'Cancel the '\
-        'selected Subscription(s) at the end '\
-        'of the billing cycle'
+
+    cancel_at_end_of_cycle.short_description = 'Cancel the ' \
+                                               'selected Subscription(s) at the end ' \
+                                               'of the billing cycle'
 
     def end(self, request, queryset):
         self.perform_action(request, 'end', queryset)
+
     end.short_description = 'End the selected Subscription(s) '
+
+    def get_plan_name(self, subscription):
+        return subscription.plan.name
+
+    get_plan_name.short_description = "Plan"
+    get_plan_name.admin_order_field = 'billing__plan__name'
 
 
 class CustomerAdmin(LiveModelAdmin):
@@ -325,6 +394,7 @@ class CustomerAdmin(LiveModelAdmin):
 
         }
         return render(request, 'admin/issue_all_customer_documents.html', context)
+
     generate_all_documents.short_description = 'Generate all user\'s Invoices and Proformas'
 
 
@@ -337,19 +407,20 @@ class ProviderAdmin(LiveModelAdmin):
               'cycle_billing_duration', 'extra', 'meta']
     list_display = ['name', 'invoice_series_list_display',
                     'proforma_series_list_display', metadata]
-    search_fields = ['customer_reference', 'name', 'company', 'address_1',
-                     'address_2', 'city', 'zip_code', 'country', 'state',
-                     'email', 'meta']
+    search_fields = ['name', 'company', 'address_1', 'address_2', 'city', 'zip_code', 'country',
+                     'state', 'email', 'meta']
     actions = ['generate_monthly_totals']
     exclude = ['live']
 
     def invoice_series_list_display(self, obj):
         return '{}-{}'.format(obj.invoice_series, obj.invoice_starting_number)
+
     invoice_series_list_display.short_description = 'Invoice series starting number'
 
     def proforma_series_list_display(self, obj):
         return '{}-{}'.format(obj.proforma_series,
                               obj.proforma_starting_number)
+
     proforma_series_list_display.short_description = 'Proforma series starting number'
 
     def _compute_monthly_totals(self, model_klass, provider, documents):
@@ -358,76 +429,73 @@ class ProviderAdmin(LiveModelAdmin):
         totals = {}
         totals[klass_name_plural] = OrderedDict()
 
-        all_documents = documents.filter(provider=provider)
-        paid_documents = documents.filter(
-            provider=provider,
-            state=BillingDocumentBase.STATES.PAID
-        )
-        documents_months = documents.order_by().filter(
+        documents = documents.filter(provider=provider)
+
+        documents_months_years = documents.order_by().annotate(
+            month=ExtractMonth('issue_date'),
+            year=ExtractYear('issue_date'),
+        ).filter(
             provider=provider
-        ).values(
-            'month'
+        ).values_list(
+            'month', 'year'
         ).distinct()
 
-        total_draft = sum(
-            doc.total for doc in (
-                documents.filter(
-                    provider=provider,
-                    state=BillingDocumentBase.STATES.DRAFT
-                )
-            )
+        totals[klass_name_plural]['entries'] = OrderedDict()
+        documents_years_months = sorted((year, month)
+                                        for month, year in documents_months_years
+                                        if month and year)
+
+        documents_currencies = set(
+            documents.filter(provider=provider).values_list("currency", flat=True).distinct()
         )
 
-        totals[klass_name_plural]['draft_total'] = str(total_draft)
-        totals[klass_name_plural]['entries'] = OrderedDict()
-        documents_months = sorted([month['month']
-                                   for month in documents_months
-                                   if month['month']])
-        for month_value in documents_months:
-            if month_value is None:
-                continue
-            display_date = month_value.strftime('%B %Y')
-            totals[klass_name_plural]['entries'][display_date] = OrderedDict()
+        unpaid_documents = documents.filter(state=BillingDocumentBase.STATES.DRAFT)
+        draft_totals = totals[klass_name_plural]['draft'] = defaultdict(Decimal)
 
-            all_documents_from_month = all_documents.filter(
-                issue_date__month=month_value.month,
-                issue_date__year=month_value.year
+        for doc in unpaid_documents:
+            draft_totals[doc.currency] += doc.total
+
+        totals[klass_name_plural]['currencies'] = documents_currencies
+
+        for year_month in documents_years_months:
+            if year_month is None:
+                continue
+            display_date = date(day=1, month=year_month[1], year=year_month[0]).strftime('%B %Y')
+            totals[klass_name_plural]['entries'][display_date] = defaultdict(Decimal)
+
+            documents_from_month = documents.filter(
+                state__in=[BillingDocumentBase.STATES.ISSUED, BillingDocumentBase.STATES.PAID],
+                issue_date__month=year_month[1],
+                issue_date__year=year_month[0]
             )
-            paid_documents_from_month = paid_documents.filter(
-                issue_date__month=month_value.month,
-                issue_date__year=month_value.year
-            )
-            total = sum(invoice.total for invoice in all_documents_from_month)
-            total_paid = sum(invoice.total for invoice in paid_documents_from_month)
-            totals[klass_name_plural]['entries'][display_date]['total'] = str(total)
-            totals[klass_name_plural]['entries'][display_date]['paid'] = str(total_paid)
-            totals[klass_name_plural]['entries'][display_date]['unpaid'] = str(total - total_paid)
+            totals_per_date = totals[klass_name_plural]['entries'][display_date]
+
+            for doc in documents_from_month:
+                totals_per_date['total_' + doc.currency] += doc.total
+
+                if doc.state == BillingDocumentBase.STATES.ISSUED:
+                    totals_per_date['unpaid_' + doc.currency] += doc.total
+
+                if doc.state == BillingDocumentBase.STATES.PAID:
+                    totals_per_date['paid_' + doc.currency] += doc.total
+
+            totals[klass_name_plural]['entries'][display_date] = {
+                total_key: str(total_value) for total_key, total_value in totals_per_date.items()
+            }
 
         return totals
 
     def generate_monthly_totals(self, request, queryset):
         totals = {}
 
-        invoices = Invoice.objects.extra(
-            select={
-                'month': connections[Invoice.objects.db].ops.date_trunc_sql(
-                    'month', 'issue_date'
-                )
-            }
-        ).filter(
+        invoices = Invoice.objects.filter(
             provider__in=queryset,
             state__in=[BillingDocumentBase.STATES.DRAFT,
                        BillingDocumentBase.STATES.ISSUED,
                        BillingDocumentBase.STATES.PAID]
         )
 
-        proformas = Proforma.objects.extra(
-            select={
-                'month': connections[Invoice.objects.db].ops.date_trunc_sql(
-                    'month', 'issue_date'
-                )
-            }
-        ).filter(
+        proformas = Proforma.objects.filter(
             provider__in=queryset,
             state__in=[BillingDocumentBase.STATES.DRAFT,
                        BillingDocumentBase.STATES.ISSUED,
@@ -448,7 +516,7 @@ class ProviderAdmin(LiveModelAdmin):
             'title': _('Monthly totals'),
             'totals': totals,
             'queryset': queryset,
-            'opts': self.model._meta
+            'opts': self.model._meta,
         }
 
         return render(request, 'admin/monthly_totals.html', context)
@@ -457,7 +525,6 @@ class ProviderAdmin(LiveModelAdmin):
 
 
 class DocumentEntryForm(forms.ModelForm):
-
     class Meta:
         model = DocumentEntry
         fields = ('description', 'prorated', 'product_code', 'unit',
@@ -531,6 +598,14 @@ class InvoiceForm(BillingDocumentForm):
         # NOTE: The exact fields fill be added in the InvoiceAdmin. This was
         # added here to remove the deprecation warning.
         fields = ()
+        widgets = {
+            'provider': autocomplete.ModelSelect2(
+                url='autocomplete-provider'
+            ),
+            'customer': autocomplete.ModelSelect2(
+                url='autocomplete-customer'
+            ),
+        }
 
 
 class ProformaForm(BillingDocumentForm):
@@ -539,6 +614,14 @@ class ProformaForm(BillingDocumentForm):
         # NOTE: The exact fields fill be added in the ProformaAdmin. This was
         # added here to remove the deprecation warning.
         fields = ()
+        widgets = {
+            'provider': autocomplete.ModelSelect2(
+                url='autocomplete-provider'
+            ),
+            'customer': autocomplete.ModelSelect2(
+                url='autocomplete-customer'
+            ),
+        }
 
 
 class DueDateFilter(SimpleListFilter):
@@ -584,22 +667,66 @@ class DueDateFilter(SimpleListFilter):
         return queryset
 
 
-class BillingDocumentAdmin(ModelAdmin):
-    list_display = ['series_number', 'customer', 'state',
-                    'provider', 'issue_date', 'due_date', 'paid_date',
-                    'cancel_date', tax, 'total', 'transaction_total', 'get_related_document']
+class InvoiceFilter(SimpleListFilter):
+    title = _('invoice')
+    parameter_name = 'invoice'
 
-    list_filter = ('provider__company', 'state', 'customer', DueDateFilter)
+    def lookups(self, request, model_admin):
+        queryset = model_admin.get_queryset(request)
+
+        invoices_queryset = Invoice.objects \
+            .filter(invoice_transactions__in=queryset.distinct()) \
+            .annotate(_series_number=Concat(F('series'), Value('-'), F('number'),
+                                            output_field=fields.CharField())) \
+            .values_list('id', '_series_number') \
+            .distinct()
+
+        return list(invoices_queryset)
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(invoice__exact=self.value())
+        return queryset
+
+
+class ProformaFilter(SimpleListFilter):
+    title = _('proforma')
+    parameter_name = 'proforma'
+
+    def lookups(self, request, model_admin):
+        queryset = model_admin.get_queryset(request)
+
+        proformas_queryset = Proforma.objects \
+            .filter(proforma_transactions__in=queryset.distinct()) \
+            .annotate(_series_number=Concat(F('series'), Value('-'), F('number'),
+                                            output_field=fields.CharField())) \
+            .values_list('id', '_series_number') \
+            .distinct()
+
+        return list(proformas_queryset)
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(proforma__exact=self.value())
+        return queryset
+
+
+class BillingDocumentAdmin(ModelAdmin):
+    list_display = ['series_number', 'get_customer', 'state',
+                    'get_provider', 'issue_date', 'due_date', 'paid_date',
+                    'cancel_date', tax, 'total', 'transactions', 'is_storno',
+                    'get_related_document']
+
+    list_filter = ('provider__company', 'state', 'customer', DueDateFilter, 'is_storno')
 
     common_fields = ['company', 'address_1', 'address_2', 'city',
                      'country', 'zip_code', 'state', 'email']
     customer_search_fields = ['customer__{field}'.format(field=field)
-                              for field in common_fields + ['first_name',
-                                                            'last_name']]
+                              for field in common_fields + ['first_name', 'last_name']]
     provider_search_fields = ['provider__{field}'.format(field=field)
                               for field in common_fields + ['name']]
     search_fields = (customer_search_fields + provider_search_fields +
-                     ['series', 'number'])
+                     ['series', 'number', '_total', '_total_in_transaction_currency'])
 
     date_hierarchy = 'issue_date'
 
@@ -607,8 +734,8 @@ class BillingDocumentAdmin(ModelAdmin):
               'due_date', 'paid_date', 'cancel_date',
               ('sales_tax_name', 'sales_tax_percent'), 'currency',
               ('transaction_currency', 'transaction_xe_rate'),
-              'transaction_xe_date', 'state', 'total', 'related_document')
-    readonly_fields = ('state', 'total', 'related_document')
+              'transaction_xe_date', ('state', 'is_storno'), 'total', 'get_related_document')
+    readonly_fields = ('state', 'total', 'get_related_document', 'is_storno')
     inlines = [DocumentEntryInline]
     actions = ['issue', 'pay', 'cancel', 'clone', 'download_selected_documents',
                'mark_pdf_for_generation']
@@ -620,6 +747,15 @@ class BillingDocumentAdmin(ModelAdmin):
                                                                 'provider',
                                                                 'pdf')
 
+    def get_search_results(self, request, queryset, search_term):
+        if '-' in search_term and search_term[-1].isdigit():
+            return queryset \
+                .annotate(_series_number=Concat(F('series'), Value('-'), F('number'),
+                                                output_field=fields.CharField())) \
+                .filter(_series_number=search_term), True
+
+        return super(BillingDocumentAdmin, self).get_search_results(request, queryset, search_term)
+
     @property
     def _model(self):
         raise NotImplementedError
@@ -628,69 +764,107 @@ class BillingDocumentAdmin(ModelAdmin):
     def _model_name(self):
         raise NotImplementedError
 
-    def perform_action(self, request, queryset, action):
+    def _call_method_on_queryset(self, request, method, queryset, action):
+        results = {}
+        for document in queryset:
+            results[document] = {}
+            try:
+                results[document]['success'] = True
+                results[document]['result'] = method(document)
+
+                document.save()
+
+                LogEntry.objects.log_action(
+                    user_id=request.user.id,
+                    content_type_id=ContentType.objects.get_for_model(document).pk,
+                    object_id=document.id,
+                    object_repr=force_text(document),
+                    action_flag=CHANGE,
+                    change_message='{action} action initiated by user.'.format(
+                        action=action.replace('_', ' ').strip().capitalize()
+                    )
+                )
+            except TransitionNotAllowed as error:
+                results[document]['result'] = mark_safe(error)
+                results[document]['success'] = False
+            except ValueError as error:
+                results[document]['result'] = force_text(error)
+                results[document]['success'] = False
+            except AttributeError:
+                results[document]['success'] = False
+                results[document]['result'] = ""
+
+        return results
+
+    def _parse_results_into_messages(self, results):
+        parsed_results = []
+        for document, result in results.items():
+            message, info = "", ""
+
+            if result['success'] and result['result'] or not result['success']:
+                message = document.admin_change_url
+
+                if result['result']:
+                    info = getattr(result['result'], 'admin_change_url',
+                                   conditional_escape(result['result']))
+            if message:
+                if result:
+                    message += ": " + info
+                parsed_results.append(message)
+
+        return parsed_results
+
+    def perform_action(self, request, queryset, action,
+                       readable_action=None, readable_past_action=None):
         method = getattr(self._model, action, None)
         if not method:
             self.message_user(request, 'Illegal action.', level=messages.ERROR)
             return
 
-        failed_changes = []
-        failed_actions = []
+        readable_action = readable_action or action.replace('_', ' ').strip()
+        readable_past_action = (readable_past_action if readable_past_action else
+                                "executed {action}".format(action=action))
 
-        readable_action = action.replace('_', ' ').strip().capitalize()
+        results = self._call_method_on_queryset(request, method, queryset, action)
+        error_results = {document: result for document, result in results.items()
+                         if not result['success']}
+        success_results = {document: result for document, result in results.items()
+                           if result['success']}
 
-        results = []
-        for entry in queryset:
-            try:
-                result = method(entry)
-                if result:
-                    results.append(result)
-                entry.save()
+        error_results_count, success_results_count = len(error_results), len(success_results)
 
-                LogEntry.objects.log_action(
-                    user_id=request.user.id,
-                    content_type_id=ContentType.objects.get_for_model(entry).pk,
-                    object_id=entry.id,
-                    object_repr=force_text(entry),
-                    action_flag=CHANGE,
-                    change_message='{action} action initiated by user.'.format(
-                        action=readable_action
-                    )
+        model_name = self._model_name.lower()
+        model_name_plural = model_name + "s"
+
+        success_message, error_message = "", ""
+        if success_results_count:
+            documents_pluralization = model_name_plural if success_results_count else model_name
+
+            success_message = "Successfully {readable_past_action} {count} " \
+                "{documents_pluralization}".format(
+                    readable_past_action=readable_past_action, count=success_results_count,
+                    documents_pluralization=documents_pluralization
                 )
-            except TransitionNotAllowed:
-                failed_changes.append(entry.id)
-            except ValueError as error:
-                failed_actions.append(force_text(error))
-            except AttributeError:
-                failed_actions.append('{action} failed for {document}.'.format(
-                    action=readable_action, document=entry
-                ))
 
-        if failed_actions:
-            msg = "\n".join(failed_actions)
-            self.message_user(request, msg, level=messages.ERROR)
+            success_results_messages = self._parse_results_into_messages(success_results)
+            if success_results_messages:
+                success_message += ":<br/>" + "<br/>".join(success_results_messages)
 
-        if failed_changes:
-            failed_ids = ' '.join(map(str, failed_changes))
-            msg = "The state change failed for {model_name}(s) with "\
-                  "ids: {ids}".format(model_name=self._model_name.lower(),
-                                      ids=failed_ids)
-            self.message_user(request, msg, level=messages.ERROR)
+        if error_results_count:
+            documents_pluralization = model_name_plural if error_results_count else model_name
 
-        if not failed_actions and not failed_changes:
-            qs_count = queryset.count()
-            if action == 'clone_into_draft':
-                results = ', '.join(result.series_number for result in results)
-                msg = 'Successfully cloned {count} {model_name}(s) ' \
-                      'into {results}.'.format(
-                          model_name=self._model_name.lower(), count=qs_count,
-                          results=results
-                      )
-            else:
-                msg = 'Successfully changed {count} {model_name}(s).'.format(
-                    model_name=self._model_name.lower(), count=qs_count
-                )
-            self.message_user(request, msg)
+            error_message = "Couldn't {readable_action} {count} {documents_pluralization}".format(
+                readable_action=readable_action, count=error_results_count,
+                documents_pluralization=documents_pluralization
+            )
+
+            error_results_messages = self._parse_results_into_messages(error_results)
+            error_message += ":<br/>" + "<br/>".join(error_results_messages)
+
+        if error_message:
+            self.message_user(request, mark_safe(error_message), level=messages.ERROR)
+        if success_message:
+            self.message_user(request, mark_safe(success_message))
 
     def has_delete_permission(self, request, obj=None):
         if request.user.is_superuser:
@@ -705,31 +879,39 @@ class BillingDocumentAdmin(ModelAdmin):
         return actions
 
     def total(self, obj):
-        return '{:.2f} {currency}'.format(obj.total,
-                                          currency=obj.currency)
+        return '{:.2f} {currency}'.format(obj.total, currency=obj.currency)
 
-    def transaction_total(self, obj):
+    total.admin_order_field = '_total'
+
+    def transactions(self, obj):
         if obj.transaction_xe_rate:
-            return '{:.2f} {currency}'.format(obj.total_in_transaction_currency,
-                                              currency=obj.transaction_currency)
+            url_base = 'admin:silver_transaction_changelist'
+
+            url = furl(reverse(url_base))
+            url.add(args={obj.__class__.__name__.lower() + "__id__exact": obj.pk})
+
+            return '<a href="{url}" target="_blank">{total:.2f} {currency}</a>'.format(
+                url=url.url, total=obj.total_in_transaction_currency,
+                currency=obj.transaction_currency
+            )
+
         return None
+
+    transactions.allow_tags = True
+    transactions.admin_order_field = '_total_in_transaction_currency'
 
     def _download_pdf(self, url, base_path):
         local_file_path = os.path.join(base_path, 'billing-temp-document.pdf')
-        response = requests.get(url, stream=True)
-        should_wipe_bad_headers = True
+        response = requests.get(url)
+        response.encoding = 'utf-8'
+
         with open(local_file_path, 'wb') as out_file:
-            for chunk in response.iter_content(chunk_size=1024):
-                if chunk:
-                    if should_wipe_bad_headers:
-                        pdf_header_pos = chunk.find('%PDF-')
-                        if pdf_header_pos > 0:
-                            # The file does not start with the '%PDF-' header
-                            # => trim everything up to that position
-                            chunk = chunk[pdf_header_pos:]
-                        should_wipe_bad_headers = False
-                    out_file.write(chunk)
-                    out_file.flush()
+            content = response.content
+            pdf_header_pos = content.find(b'%PDF-')
+            if pdf_header_pos > 0:
+                content = content[pdf_header_pos:]
+            out_file.write(content)
+            out_file.flush()
 
         return local_file_path
 
@@ -785,8 +967,23 @@ class BillingDocumentAdmin(ModelAdmin):
 
     def get_related_document(self, obj):
         return obj.related_document.admin_change_url if obj.related_document else None
-    get_related_document.short_description = 'Related document'
+
+    get_related_document.short_description = 'Related doc'
     get_related_document.allow_tags = True
+
+    def get_customer(self, obj):
+        return obj.customer.admin_change_url
+
+    get_customer.allow_tags = True
+    get_customer.short_description = "customer"
+    get_customer.admin_order_field = "customer"
+
+    def get_provider(self, obj):
+        return obj.provider.admin_change_url
+
+    get_provider.allow_tags = True
+    get_provider.short_description = "provider"
+    get_provider.admin_order_field = "provider"
 
 
 class InvoiceDocumentEntryInline(DocumentEntryInline):
@@ -796,37 +993,54 @@ class InvoiceDocumentEntryInline(DocumentEntryInline):
 class InvoiceAdmin(BillingDocumentAdmin):
     form = InvoiceForm
     list_display = BillingDocumentAdmin.list_display + [
-        'invoice_pdf',
+        'get_invoice_pdf',
     ]
     inlines = [InvoiceDocumentEntryInline]
+    actions = BillingDocumentAdmin.actions + ['create_storno']
 
     def issue(self, request, queryset):
-        self.perform_action(request, queryset, 'issue')
+        self.perform_action(request, queryset, 'issue', readable_past_action='issued')
+
     issue.short_description = 'Issue the selected invoice(s)'
 
     def pay(self, request, queryset):
-        self.perform_action(request, queryset, 'pay')
+        self.perform_action(request, queryset, 'pay', readable_past_action='paid')
+
     pay.short_description = 'Pay the selected invoice(s)'
 
     def cancel(self, request, queryset):
-        self.perform_action(request, queryset, 'cancel')
+        self.perform_action(request, queryset, 'cancel', readable_past_action='canceled')
+
     cancel.short_description = 'Cancel the selected invoice(s)'
 
+    def create_storno(self, request, queryset):
+        self.perform_action(request, queryset, 'create_storno', readable_action='create storno for',
+                            readable_past_action='created storno for')
+
+    create_storno.short_description = 'Generate storno(s) for the selected invoice(s)'
+
     def clone(self, request, queryset):
-        self.perform_action(request, queryset, 'clone_into_draft')
+        self.perform_action(request, queryset, 'clone_into_draft',
+                            readable_action='generate draft clones for',
+                            readable_past_action='generated draft clones for')
+
     clone.short_description = 'Clone the selected invoice(s) into draft'
 
     def mark_pdf_for_generation(self, request, queryset):
-        self.perform_action(request, queryset, 'mark_for_generation')
+        self.perform_action(request, queryset, 'mark_for_generation',
+                            readable_past_action='marked for generation')
+
     mark_pdf_for_generation.short_description = 'Mark the selected invoice(s) for PDF generation'
 
-    def invoice_pdf(self, invoice):
+    def get_invoice_pdf(self, invoice):
         if invoice.pdf:
             url = reverse('invoice-pdf', kwargs={'invoice_id': invoice.id})
-            return '<a href="{url}" target="_blank">{url}</a>'.format(url=url)
+            return '<a href="{url}" target="_blank">Download</a>'.format(url=url)
         else:
             return None
-    invoice_pdf.allow_tags = True
+
+    get_invoice_pdf.short_description = "PDF"
+    get_invoice_pdf.allow_tags = True
 
     @property
     def _model(self):
@@ -844,42 +1058,50 @@ class ProformaDocumentEntryInline(DocumentEntryInline):
 class ProformaAdmin(BillingDocumentAdmin):
     form = ProformaForm
     list_display = BillingDocumentAdmin.list_display + [
-        'proforma_pdf',
+        'get_proforma_pdf',
     ]
     inlines = [ProformaDocumentEntryInline]
     actions = BillingDocumentAdmin.actions + ['create_invoice']
 
     def issue(self, request, queryset):
         self.perform_action(request, queryset, 'issue')
+
     issue.short_description = 'Issue the selected proforma(s)'
 
     def create_invoice(self, request, queryset):
         self.perform_action(request, queryset, 'create_invoice')
+
     create_invoice.short_description = 'Create invoice from proforma(s)'
 
     def pay(self, request, queryset):
         self.perform_action(request, queryset, 'pay')
+
     pay.short_description = 'Pay the selected proforma(s)'
 
     def cancel(self, request, queryset):
         self.perform_action(request, queryset, 'cancel')
+
     cancel.short_description = 'Cancel the selected proforma(s)'
 
     def clone(self, request, queryset):
         self.perform_action(request, queryset, 'clone_into_draft')
+
     clone.short_description = 'Clone the selected proforma(s) into draft'
 
     def mark_pdf_for_generation(self, request, queryset):
         self.perform_action(request, queryset, 'mark_for_generation')
+
     mark_pdf_for_generation.short_description = 'Mark the selected proforma(s) for PDF generation'
 
-    def proforma_pdf(self, proforma):
+    def get_proforma_pdf(self, proforma):
         if proforma.pdf:
             url = reverse('proforma-pdf', kwargs={'proforma_id': proforma.id})
-            return '<a href="{url}" target="_blank">{url}</a>'.format(url=url)
+            return '<a href="{url}" target="_blank">Download</a>'.format(url=url)
         else:
             return None
-    proforma_pdf.allow_tags = True
+
+    get_proforma_pdf.short_description = "PDF"
+    get_proforma_pdf.allow_tags = True
 
     @property
     def _model(self):
@@ -943,8 +1165,8 @@ class TransactionAdmin(ModelAdmin):
                     'amount', 'state', 'created_at', 'updated_at',
                     'get_customer', 'get_pay_url', 'get_payment_method',
                     'get_is_recurring')
-    list_filter = ('payment_method__customer', 'state',
-                   'payment_method__payment_processor')
+    list_filter = ('payment_method__customer', 'state', 'payment_method__payment_processor',
+                   ProformaFilter, InvoiceFilter)
     actions = ['execute', 'process', 'cancel', 'settle', 'fail']
     ordering = ['-created_at']
 
@@ -966,21 +1188,22 @@ class TransactionAdmin(ModelAdmin):
     get_pay_url.short_description = 'Pay URL'
 
     def get_customer(self, obj):
-        link = urlresolvers.reverse("admin:silver_customer_change",
-                                    args=[obj.payment_method.customer.pk])
-        return u'<a href="%s">%s</a>' % (link, obj.payment_method.customer)
+        return obj.customer.admin_change_url
+
     get_customer.allow_tags = True
     get_customer.short_description = 'Customer'
+    get_customer.admin_order_field = 'customer'
 
     def get_is_recurring(self, obj):
         return obj.payment_method.verified
+
     get_is_recurring.boolean = True
     get_is_recurring.short_description = 'Recurring'
 
     def get_payment_method(self, obj):
-        link = urlresolvers.reverse("admin:silver_paymentmethod_change",
-                                    args=[obj.payment_method.pk])
+        link = reverse("admin:silver_paymentmethod_change", args=[obj.payment_method.pk])
         return u'<a href="%s">%s</a>' % (link, obj.payment_method)
+
     get_payment_method.allow_tags = True
     get_payment_method.short_description = 'Payment Method'
 
@@ -1080,31 +1303,38 @@ class TransactionAdmin(ModelAdmin):
             'failed_count': failed_count,
             'settled_count': settled_count
         })
+
     execute.short_description = 'Execute the selected transactions'
 
     def process(self, request, queryset):
         self.perform_action(request, queryset, 'process', 'processed')
+
     process.short_description = 'Process the selected transactions'
 
     def cancel(self, request, queryset):
         self.perform_action(request, queryset, 'cancel', 'canceled')
+
     cancel.short_description = 'Cancel the selected transactions'
 
     def settle(self, request, queryset):
         self.perform_action(request, queryset, 'settle', 'settled')
+
     settle.short_description = 'Settle the selected transactions'
 
     def fail(self, request, queryset):
         self.perform_action(request, queryset, 'fail', 'failed')
+
     fail.short_description = 'Fail the selected transactions'
 
     def related_invoice(self, obj):
         return obj.invoice.admin_change_url if obj.invoice else None
+
     related_invoice.allow_tags = True
     related_invoice.short_description = 'Invoice'
 
     def related_proforma(self, obj):
         return obj.proforma.admin_change_url if obj.proforma else None
+
     related_proforma.allow_tags = True
     related_proforma.short_description = 'Proforma'
 

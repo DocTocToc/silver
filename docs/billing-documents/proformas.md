@@ -14,7 +14,7 @@ toc: true
 related: true
 ---
 
-For resource definition check out the [Resources]({{< ref "../resources.md" >}}) page.
+For resource definition check out the [Resources](../resources.md) page.
 
 ## List all proformas
 
@@ -181,9 +181,9 @@ Content-Type: application/json
 
 ## Update a proforma
 
-{{% note %}}
-Modifying a proforma is only possible when it's in `draft` state. Also, take note that the proforma's state cannot be updated through this method.
-{{% /note %}}
+> ###### NOTE
+>
+> Modifying a proforma is only possible when it's in `draft` state. Also, take note that the proforma's state cannot be updated through this method.
 
 Use `PATCH` for partial update and `PUT` for full update
 
@@ -217,9 +217,9 @@ Content-Type: application/json
 
 ## Add an entry to a proforma
 
-{{% note %}}
-Adding an entry is only possible when the proforma is in `draft` state.
-{{% /note %}}
+> ###### NOTE
+>
+> Adding an entry is only possible when the proforma is in `draft` state.
 
 ``` http
 POST /proformas/:id/entries HTTP/1.1
@@ -239,9 +239,9 @@ Content-Type: application/json
 
 ## Update an entry of a proforma
 
-{{% note %}}
-Updating an entry is only possible when the proforma is in `draft` state.
-{{% /note %}}
+> ###### NOTE
+>
+> Updating an entry is only possible when the proforma is in `draft` state.
 
 ``` http
 PUT /proformas/:id/entries/:entry_id HTTP/1.1
@@ -261,23 +261,15 @@ Content-Type: application/json
 
 ## Delete an entry from a proforma
 
-{{% note %}}
-Deleting an entry is only possible when the proforma is in `draft` state.
-{{% /note %}}
+> ###### NOTE
+>
+> Deleting an entry is only possible when the proforma is in `draft` state.
 
 ``` http
 DELETE /proformas/:id/entries/:entry_id HTTP/1.1
 ```
 
 ## Issue a proforma
-
-The proforma must be in the `draft` state.
-Issuing a proforma follows these steps:
-
-* When `issue_date` is specified, the proforma's `issue_date` is set to this value. If it's not and the proforma has no `issue_date` set, it it set to the current date.
-* If `due_date` is specified it overwrites the proforma's `due_date`
-* If the proforma has no `billing_details` set, it copies the `billing_details` from the customer. The same goes with `sales_tax_percent` and `sales_tax_name`
-* Sets the proforma status to `issued`
 
 ``` http
 PATCH /proformas/:id/state HTTP/1.1
@@ -290,17 +282,15 @@ Content-Type: application/json
 }
 ```
 
+The proforma must be in the `draft` state.
+Issuing a proforma follows these steps:
+
+* When `issue_date` is specified, the proforma's `issue_date` is set to this value. If it's not and the proforma has no `issue_date` set, it it set to the current date.
+* If `due_date` is specified it overwrites the proforma's `due_date`
+* If the proforma has no `billing_details` set, it copies the `billing_details` from the customer. The same goes with `sales_tax_percent` and `sales_tax_name`
+* Sets the proforma status to `issued`
+
 ## Pay a proforma
-
-The proforma must be in the `issued` state.
-Paying a proforma follows these steps:
-
-* If `paid_date` is specified, set the proforma `paid_date` to this value, else set the proforma `paid_date` to the current date
-* Sets the proforma status to `paid`
-
-{{% note %}}
-if the provider's selected flow is `proforma`, when a proforma is paid, a proforma is issued and transitioned to `paid` state.
-{{% /note %}}
 
 ``` http
 PATCH /proformas/:id/state HTTP/1.1
@@ -312,12 +302,17 @@ Content-Type: application/json
 }
 ```
 
-## Cancel a proforma
 The proforma must be in the `issued` state.
-Canceling an proforma follows these steps:
+Paying a proforma follows these steps:
 
-* If `cancel_date` is specified, set the proforma `cancel_date` to this value, else set the proforma `cancel_date` to the current date
+* If `paid_date` is specified, set the proforma `paid_date` to this value, else set the proforma `paid_date` to the current date
 * Sets the proforma status to `paid`
+
+> ###### NOTE
+>
+> If the provider's selected flow is `proforma`, when a proforma is paid, a proforma is issued and transitioned to `paid` state.
+
+## Cancel a proforma
 
 ``` http
 PATCH /proformas/:id/state HTTP/1.1
@@ -328,3 +323,9 @@ Content-Type: application/json
   "cancel_date": "2014-10-04"
 }
 ```
+
+The proforma must be in the `issued` state.
+Canceling an proforma follows these steps:
+
+* If `cancel_date` is specified, set the proforma `cancel_date` to this value, else set the proforma `cancel_date` to the current date
+* Sets the proforma status to `paid`

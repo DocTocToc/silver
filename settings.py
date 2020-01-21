@@ -13,6 +13,7 @@
 # limitations under the License.
 import os
 import datetime
+import sys
 
 from silver import HOOK_EVENTS as _HOOK_EVENTS
 from django.utils.log import DEFAULT_LOGGING as LOGGING
@@ -103,19 +104,24 @@ MEDIA_URL = '/app_media/'
 STATIC_ROOT = PROJECT_ROOT + '/app_static/'
 STATIC_URL = '/app_static/'
 
-MIDDLEWARE_CLASSES = (
+MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-)
+]
 
 SECRET_KEY = 'secret'
 
 REST_FRAMEWORK = {
-    'DEFAULT_PAGINATION_CLASS': 'silver.api.pagination.LinkHeaderPagination'
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+        'rest_framework.renderers.BrowsableAPIRenderer',
+    ),
+    'DEFAULT_PAGINATION_CLASS': 'silver.api.pagination.LinkHeaderPagination',
+    'TEST_REQUEST_DEFAULT_FORMAT': 'json'
 }
 
 HOOK_EVENTS = _HOOK_EVENTS
@@ -178,3 +184,9 @@ try:
     from settings_local import *
 except ImportError:
     pass
+
+if sys.argv[0].endswith('pytest'):
+    from silver.fixtures.test_fixtures import PAYMENT_PROCESSORS
+    PAYMENT_DUE_DAYS = 5
+    REST_FRAMEWORK['PAGE_SIZE'] = API_PAGE_SIZE = 5
+    SILVER_SHOW_PDF_STORAGE_URL = True

@@ -2,6 +2,89 @@
 
 ## Unrealeased changes
 _Nothing yet_
+## 0.10.1
+Fixed issue in autocomplete views where user.is_authenticated is no longer a function call and instead an attribute 
+
+## 0.10 (2019-09-03)
+Some of these changes are considered to be breaking and were marked with **(BREAKING)**
+
+### API
+- `Invoice` and `Proforma` fields `archived_provider` and `archived_customer` are now represented
+  as JSON instead of a string. **(BREAKING)**
+- Decimal numbers are now always properly typed as string. **(BREAKING)**
+- Rewrote some tests using pytest and [specs](https://github.com/silverapp/silver/tree/master/silver/tests/api/specs).
+- Not specifying `transaction_xe_rate` when creating documents no longer results in an internal error.
+- `number` and `series` are no longer required when creating a document.
+
+### General
+- `proforma_series` is now included in the `archived_provider` field for invoices as well.
+
+
+## 0.9.6 (2019-10-28)
+- Remove Subscription state field direct modification protection. This fixes admin subscription
+  creation / editing and Subscription.refresh_from_db. Regarding the removed protection, just don't
+  modify the field directly, use the state transition methods instead.
+- The Subscription state field is properly marked as read-only now. You couldn't modify it before
+  anyway.
+
+## 0.9.5 (2019-09-03)
+- Make some admin fields dropdowns searchable.
+
+## 0.9.4 (2019-07-17)
+- Fixed a possible crash when generating documents for subscriptions with the trial period spanning over multiple billing cycles.
+
+## 0.9.3 (2019-06-27)
+This release contains security changes that were marked below with **(SECURITY)**. It is advised to
+upgrade to the latest version of django-silver.
+- Escape user-inputable text before marking it as safe in admin. **(SECURITY)**
+- Fix result handling error for a case of successful actions.
+
+## 0.9.2 (2019-06-26)
+- Fix transaction admin error.
+
+## 0.9.1 (2019-06-26)
+- Allow searching for Invoices and Proformas by "series-number" in admin.
+- Fixed Transaction admin changelist query performance.
+- Improved Plan admin changelist query performance.
+
+## 0.9 (2019-06-25)
+- Added the possibility to create storno invoices.
+- Separate totals per currency in the provider monthly totals report (admin action).
+- Scrolling horizontally is no longer required to view the entire Invoice and Proforma admin lists
+  for 1920px wide resolutions.
+- Improve admin experience by adding direct links to resources in listings.
+- Improved filtering, ordering and searching in admin for documents.
+
+## 0.8b2 (2019-06-18)
+This is a beta release. It's not recommended to use it in production environments.
+
+- Added Django2.2 compatibility
+
+## 0.8b1 (2019-06-03)
+This is a beta release. It's not recommended to use it in production environments.
+
+Some of these changes that were considered to be possibly breaking were marked with **(WARNING)**.
+- Added Django2.0 and Django2.1 compatibility
+- If you are using Python2.7 and Django 1.11 you'll probably have to manually pin `django-filters==1.1` in your project's requirements. **(WARNING)**
+- Transaction objects are now automatically cleaned before saving. **(WARNING)**
+- The following API query params will no longer allow partial lookups (exact match is required now): `currency`, `sales_tax_name`. **(WARNING)**
+- The following API query params will no longer allow case insensitive lookups: `state`, `reference`. **(WARNING)**
+- Starting with a future release all API query params will probably require exact, case sensitive matching.
+
+## 0.7.4 (2019-04-08)
+- Fixed BillingLog invoice field not being updated post creation. (migration fix included)
+- Fixed PDF file download in admin.
+
+## 0.7.3 (2019-02-08)
+- Fix PDF file upload for Google Storage.
+
+## 0.7.2 (2019-02-08)
+- Don't use evil mock.assert_* functions.
+
+## 0.7.1 (2019-02-08)
+- Fixed documents PDF generation.
+- Added classifiers for Python 3.5 and 3.6 in setup.py.
+- Fixed typo and obsolete keys in users endpoint API documentation
 
 ## 0.7 (2019-01-07)
 Some of these changes that were considered to be possibly breaking were marked with **(WARNING)**.
@@ -176,11 +259,11 @@ for the next months invoices to be generated even if the customer has consolidat
 
 ## 0.2.8 (2017-07-17)
 Some of these changes are considered to be breaking and were marked with **(BREAKING)**
-- The PDFs for Invoices and Proformas are now generated asynchronously using Celery tasks. Redis is 
+- The PDFs for Invoices and Proformas are now generated asynchronously using Celery tasks. Redis is
 required for locking. **(BREAKING)**
-- PDFs now have their own model, therefore a migration has been created, which unfortunately fails 
+- PDFs now have their own model, therefore a migration has been created, which unfortunately fails
 to migrate the file url. **(BREAKING)**
-A way to fix this would be to regenerate and re-upload the PDFs. Another way that should work would 
+A way to fix this would be to regenerate and re-upload the PDFs. Another way that should work would
 be to set the PDF.pdf_file.name value from the old Invoice.pdf_file.name.
 
 ## 0.2.7 (2017-02-08)

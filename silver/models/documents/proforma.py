@@ -55,6 +55,9 @@ class Proforma(BillingDocumentBase):
 
     def clean(self):
         super(Proforma, self).clean()
+        if self.is_storno:
+            raise ValidationError({"is_storno": "A proforma cannot be a storno."})
+
         if not self.series:
             if not hasattr(self, 'provider'):
                 # the clean method is called even if the clean_fields method
@@ -69,7 +72,7 @@ class Proforma(BillingDocumentBase):
     @transition(field='state', source=BillingDocumentBase.STATES.DRAFT,
                 target=BillingDocumentBase.STATES.ISSUED)
     def issue(self, issue_date=None, due_date=None):
-        self.archived_provider = self.provider.get_proforma_archivable_field_values()
+        self.archived_provider = self.provider.get_archivable_field_values()
 
         super(Proforma, self)._issue(issue_date, due_date)
 
@@ -139,6 +142,10 @@ class Proforma(BillingDocumentBase):
     @property
     def entries(self):
         return self.proforma_entries.all()
+
+    @property
+    def invoice(self):
+        return self.related_document
 
 
 @receiver(pre_delete, sender=Proforma)

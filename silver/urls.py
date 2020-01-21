@@ -22,14 +22,15 @@ from django.contrib import admin
 
 from silver.views import (pay_transaction_view, complete_payment_view,
                           InvoiceAutocomplete, ProformaAutocomplete,
-                          PaymentMethodAutocomplete)
+                          PaymentMethodAutocomplete, PlanAutocomplete,
+                          CustomerAutocomplete, ProviderAutocomplete)
 
 
 admin.autodiscover()
 
 
 urlpatterns = [
-    url(r'^admin/', include(admin.site.urls)),
+    url(r'^admin/', admin.site.urls),
     url(r'^api-auth/', include('rest_framework.urls',
                                namespace='rest_framework')),
     url(r'', include('silver.api.urls')),
@@ -45,4 +46,10 @@ urlpatterns = [
         ProformaAutocomplete.as_view(), name='autocomplete-proforma'),
     url(r'^autocomplete/payment-method/$',
         PaymentMethodAutocomplete.as_view(), name='autocomplete-payment-method'),
+    url(r'^autocomplete/plan/$',
+        PlanAutocomplete.as_view(), name='autocomplete-plan'),
+    url(r'^autocomplete/customer/$',
+        CustomerAutocomplete.as_view(), name='autocomplete-customer'),
+    url(r'^autocomplete/provider/$',
+        ProviderAutocomplete.as_view(), name='autocomplete-provider'),
 ]

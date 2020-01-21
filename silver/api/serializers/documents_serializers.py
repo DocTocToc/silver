@@ -15,23 +15,34 @@
 from __future__ import absolute_import
 
 from rest_framework import serializers
+from rest_framework.fields import JSONField, DecimalField
 
 from silver.api.serializers.common import CustomerUrl, PDFUrl
 from silver.api.serializers.transaction_serializers import TransactionSerializer
 from silver.models import DocumentEntry, Customer, Invoice, Proforma, BillingDocumentBase
+from silver.utils.serializers import AutoCleanSerializerMixin
 
 
-class DocumentEntrySerializer(serializers.HyperlinkedModelSerializer):
+class DocumentEntrySerializer(AutoCleanSerializerMixin,
+                              serializers.HyperlinkedModelSerializer):
     product_code = serializers.SlugRelatedField(
         slug_field='value',
         read_only=True
     )
+    total_before_tax = DecimalField(coerce_to_string=True, max_digits=None, decimal_places=2,
+                                    read_only=True)
+    total = DecimalField(coerce_to_string=True, max_digits=None, decimal_places=2,
+                         read_only=True)
 
     class Meta:
         model = DocumentEntry
-        fields = ('description', 'unit', 'unit_price', 'quantity', 'total',
+        fields = ('id', 'description', 'unit', 'unit_price', 'quantity', 'total',
                   'total_before_tax', 'start_date', 'end_date', 'prorated',
                   'product_code')
+        extra_kwargs = {
+            'unit_price': {'coerce_to_string': True},
+            'quantity': {'coerce_to_string': True},
+        }
 
 
 class DocumentUrl(serializers.HyperlinkedIdentityField):
@@ -99,12 +110,21 @@ class DocumentSerializer(serializers.HyperlinkedModelSerializer):
         read_only_fields = fields
 
 
-class InvoiceSerializer(serializers.HyperlinkedModelSerializer):
-    invoice_entries = DocumentEntrySerializer(many=True)
+class InvoiceSerializer(AutoCleanSerializerMixin,
+                        serializers.HyperlinkedModelSerializer):
+    invoice_entries = DocumentEntrySerializer(many=True, required=False)
     pdf_url = PDFUrl(view_name='pdf', source='*', read_only=True)
     customer = CustomerUrl(view_name='customer-detail',
                            queryset=Customer.objects.all())
     transactions = TransactionSerializer(many=True, read_only=True)
+    archived_customer = JSONField(read_only=True)
+    archived_provider = JSONField(read_only=True)
+    total_in_transaction_currency = serializers.DecimalField(
+        max_digits=None, decimal_places=2, coerce_to_string=True, read_only=True,
+    )
+    total = serializers.DecimalField(
+        max_digits=None, decimal_places=2, coerce_to_string=True, read_only=True
+    )
 
     class Meta:
         model = Invoice
@@ -115,15 +135,16 @@ class InvoiceSerializer(serializers.HyperlinkedModelSerializer):
                   'transaction_xe_rate', 'transaction_xe_date', 'state', 'proforma',
                   'invoice_entries', 'total', 'total_in_transaction_currency',
                   'pdf_url', 'transactions')
-        read_only_fields = ('archived_provider', 'archived_customer', 'total',
-                            'total_in_transaction_currency')
+        read_only_fields = ('total', 'total_in_transaction_currency')
         extra_kwargs = {
             'transaction_currency': {'required': False},
+            'number': {'required': False},
+            'series': {'required': False},
             'proforma': {'source': 'related_document', 'view_name': 'proforma-detail'}
         }
 
     def create(self, validated_data):
-        entries = validated_data.pop('invoice_entries', None)
+        entries = validated_data.pop('invoice_entries', [])
 
         # Create the new invoice object
         invoice = Invoice.objects.create(**validated_data)
@@ -156,6 +177,13 @@ class InvoiceSerializer(serializers.HyperlinkedModelSerializer):
 
         return instance
 
+    def instantiate_object(self, data):
+        invoice = super(InvoiceSerializer, self).instantiate_object(data)
+        # after clean_defaults is moved into full_clean this call won't be needed
+        invoice.clean_defaults()
+
+        return invoice
+
     def validate(self, data):
         data = super(InvoiceSerializer, self).validate(data)
 
@@ -169,8 +197,9 @@ class InvoiceSerializer(serializers.HyperlinkedModelSerializer):
         return data
 
 
-class ProformaSerializer(serializers.HyperlinkedModelSerializer):
-    proforma_entries = DocumentEntrySerializer(many=True)
+class ProformaSerializer(AutoCleanSerializerMixin,
+                         serializers.HyperlinkedModelSerializer):
+    proforma_entries = DocumentEntrySerializer(many=True, required=False)
     pdf_url = PDFUrl(view_name='pdf', source='*', read_only=True)
     customer = CustomerUrl(view_name='customer-detail',
                            queryset=Customer.objects.all())
@@ -189,11 +218,13 @@ class ProformaSerializer(serializers.HyperlinkedModelSerializer):
                             'total_in_transaction_currency')
         extra_kwargs = {
             'transaction_currency': {'required': False},
-            'invoice': {'source': 'related_document', 'view_name': 'invoice-detail'}
+            'number': {'required': False},
+            'series': {'required': False},
+            'invoice': {'source': 'related_document', 'view_name': 'invoice-detail'},
         }
 
     def create(self, validated_data):
-        entries = validated_data.pop('proforma_entries', None)
+        entries = validated_data.pop('proforma_entries', [])
 
         proforma = Proforma.objects.create(**validated_data)
 
@@ -224,11 +255,15 @@ class ProformaSerializer(serializers.HyperlinkedModelSerializer):
 
         return instance
 
+    def instantiate_object(self, data):
+        proforma = super(ProformaSerializer, self).instantiate_object(data)
+        # after clean_defaults is moved into full_clean this call won't be needed
+        proforma.clean_defaults()
+
+        return proforma
+
     def validate(self, data):
         data = super(ProformaSerializer, self).validate(data)
-
-        if self.instance:
-            self.instance.clean()
 
         if self.instance and data['state'] != self.instance.state:
             msg = "Direct state modification is not allowed." \
