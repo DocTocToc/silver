@@ -22,6 +22,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.signals import pre_save
 from django.dispatch import receiver
+from django.urls import reverse
+from django.utils.html import escape
 from django.utils.translation import ugettext_lazy as _
 
 from silver.models.billing_entities.base import BaseBillingEntity
@@ -133,20 +135,19 @@ class Provider(BaseBillingEntity):
 
     def get_archivable_field_values(self):
         base_fields = super(Provider, self).get_archivable_field_values()
-        provider_fields = ['name']
+        provider_fields = ['name', 'invoice_series', 'proforma_series']
         fields_dict = {field: getattr(self, field, '') for field in provider_fields}
         base_fields.update(fields_dict)
         return base_fields
 
-    def get_invoice_archivable_field_values(self):
-        base_fields = self.get_archivable_field_values()
-        base_fields.update({'invoice_series': getattr(self, 'invoice_series', '')})
-        return base_fields
+    @property
+    def admin_change_url(self):
+        display = escape(self.name)
+        if self.company and self.name != self.company:
+            display += "<hr> " + escape(self.company)
 
-    def get_proforma_archivable_field_values(self):
-        base_fields = self.get_archivable_field_values()
-        base_fields.update({'proforma_series': getattr(self, 'proforma_series', '')})
-        return base_fields
+        link = reverse("admin:silver_provider_change", args=[self.pk])
+        return u'<a href="%s">%s</a>' % (link, display)
 
     def __str__(self):
         return self.name

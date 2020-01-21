@@ -15,21 +15,21 @@
 from __future__ import absolute_import
 
 import datetime
-import factory
-import factory.fuzzy
-
 from decimal import Decimal
+
+import factory.fuzzy
 from faker import Faker
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.utils.six import text_type
 
 from silver.models import (Provider, Plan, MeteredFeature, Customer,
                            Subscription, Invoice, ProductCode, PDF,
                            Proforma, MeteredFeatureUnitsLog, DocumentEntry,
-                           Transaction, PaymentMethod)
-from silver.tests.fixtures import manual_processor
-
+                           Transaction, PaymentMethod, BillingLog)
+from silver.fixtures.test_fixtures import manual_processor
+from silver.utils.dates import last_day_of_month, prev_month
 
 faker = Faker(locale='hu_HU')
 
@@ -61,7 +61,7 @@ class CustomerFactory(factory.django.DjangoModelFactory):
     consolidated_billing = True
 
     customer_reference = factory.Sequence(lambda n: faker.uuid4())
-    sales_tax_percent = Decimal(1.0)
+    sales_tax_percent = Decimal("1.00")
     sales_tax_name = factory.Sequence(lambda n: 'VAT')
     payment_due_days = 5
 
@@ -172,7 +172,7 @@ class InvoiceFactory(factory.django.DjangoModelFactory):
     transaction_xe_rate = Decimal(1)
     state = Invoice.STATES.DRAFT
     issue_date = factory.LazyAttribute(
-        lambda invoice: (faker.past_datetime(start_date="-200d", tzinfo=None)
+        lambda invoice: (faker.past_datetime(start_date="-200d", tzinfo=None).date()
                          if invoice.state != Invoice.STATES.DRAFT else None)
     )
     paid_date = factory.LazyAttribute(
@@ -195,6 +195,9 @@ class InvoiceFactory(factory.django.DjangoModelFactory):
         if self.state != 'draft':
             self._total = self.compute_total()
             self._total_in_transaction_currency = self.compute_total_in_transaction_currency()
+            self.archived_customer = self.customer.get_archivable_field_values()
+            self.archived_provider = self.provider.get_archivable_field_values()
+
             self.save()
 
 
@@ -209,7 +212,7 @@ class ProformaFactory(factory.django.DjangoModelFactory):
     transaction_xe_rate = Decimal(1)
     state = Proforma.STATES.DRAFT
     issue_date = factory.LazyAttribute(
-        lambda proforma: (faker.past_datetime(start_date="-200d", tzinfo=None)
+        lambda proforma: (faker.past_datetime(start_date="-200d", tzinfo=None).date()
                           if proforma.state != Invoice.STATES.DRAFT else None)
     )
     paid_date = factory.LazyAttribute(
@@ -242,6 +245,9 @@ class ProformaFactory(factory.django.DjangoModelFactory):
         if self.state != Proforma.STATES.DRAFT:
             self._total = self.compute_total()
             self._total_in_transaction_currency = self.compute_total_in_transaction_currency()
+            self.archived_customer = self.customer.get_archivable_field_values()
+            self.archived_provider = self.provider.get_archivable_field_values()
+
             self.save()
 
 
@@ -249,8 +255,8 @@ class DocumentEntryFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = DocumentEntry
 
-    description = factory.Sequence(lambda n: 'Description{cnt}'.format(cnt=n))
-    unit = factory.Sequence(lambda n: 'Unit{cnt}'.format(cnt=n))
+    description = factory.Sequence(lambda n: text_type('Description{cnt}').format(cnt=n))
+    unit = factory.Sequence(lambda n: text_type('Unit{cnt}').format(cnt=n))
     quantity = factory.fuzzy.FuzzyDecimal(low=1.00, high=50000.00, precision=4)
     unit_price = factory.fuzzy.FuzzyDecimal(low=0.01, high=100.00, precision=4)
     product_code = factory.SubFactory(ProductCodeFactory)
@@ -324,3 +330,26 @@ class TransactionFactory(factory.django.DjangoModelFactory):
 class PDFFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = PDF
+
+
+class BillingLogFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = BillingLog
+
+    subscription = factory.SubFactory(SubscriptionFactory)
+
+    proforma = factory.SubFactory(
+        ProformaFactory,
+        customer=factory.SelfAttribute('..subscription.customer'),
+        state=Invoice.STATES.ISSUED,
+        issue_date=timezone.now().date(),
+    )
+    invoice = factory.SubFactory(
+        InvoiceFactory,
+        customer=factory.SelfAttribute('..subscription.customer'),
+        state=Invoice.STATES.ISSUED,
+        issue_date=timezone.now().date(),
+    )
+    billing_date = timezone.now().date()
+    plan_billed_up_to = last_day_of_month(timezone.now().date())
+    metered_features_billed_up_to = last_day_of_month(prev_month(timezone.now().date()))

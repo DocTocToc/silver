@@ -14,18 +14,13 @@
 
 from __future__ import absolute_import
 
-import six
-
-from uuid import UUID
-
 from datetime import datetime, timedelta
 from mock import patch, MagicMock, call
 
 from django.test import TestCase, override_settings
-from django.utils.encoding import force_text
 
-from silver.tests.factories import TransactionFactory
-from silver.tests.fixtures import PAYMENT_PROCESSORS
+from silver.fixtures.factories import TransactionFactory
+from silver.fixtures.test_fixtures import PAYMENT_PROCESSORS
 from silver.utils.decorators import get_transaction_from_token
 from silver.utils.payments import (get_payment_url, get_payment_complete_url,
                                    _get_jwt_token)
@@ -42,7 +37,7 @@ class TestPaymentsUtilMethods(TestCase):
 
             self.assertEqual(get_payment_url(transaction, None), expected_url)
 
-            mocked_token.assert_called_once_with(transaction)
+            assert mocked_token.mock_calls == [call(transaction)]
 
     def test_get_payment_complete_url(self):
         transaction = TransactionFactory()
@@ -58,7 +53,7 @@ class TestPaymentsUtilMethods(TestCase):
             self.assertEqual(get_payment_complete_url(transaction, mocked_request),
                              expected_url)
 
-            mocked_token.assert_called_once_with(transaction)
+            assert mocked_token.mock_calls == [call(transaction)]
 
     def test_get_transaction_from_token(self):
         transaction = TransactionFactory()

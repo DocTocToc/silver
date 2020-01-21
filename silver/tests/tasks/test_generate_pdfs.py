@@ -16,10 +16,10 @@ from __future__ import absolute_import
 
 import pytest
 
-from mock import patch, call, MagicMock
+from mock import patch, MagicMock
 
 from silver.tasks import generate_pdfs, generate_pdf
-from silver.tests.factories import InvoiceFactory, ProformaFactory
+from silver.fixtures.factories import InvoiceFactory, ProformaFactory
 from silver.utils.pdf import fetch_resources
 
 
@@ -90,4 +90,4 @@ def test_generate_pdf_task(settings, tmpdir, monkeypatch):
 
     assert pisa_document_mock.call_count == 1
 
-    pisa_document_mock.assert_called_once()
+    assert len(pisa_document_mock.mock_calls) == 1

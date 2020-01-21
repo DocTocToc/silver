@@ -27,7 +27,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
 from django.core.exceptions import ValidationError, NON_FIELD_ERRORS
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db import transaction as db_transaction
@@ -43,6 +43,7 @@ from silver.currencies import CurrencyConverter, RateNotFound
 from silver.models.billing_entities import Customer, Provider
 from silver.models.documents.entries import DocumentEntry
 from silver.models.documents.pdf import PDF
+from silver.utils.decorators import require_transaction_currency_and_xe_rate
 from silver.utils.international import currencies
 
 
@@ -123,14 +124,14 @@ class BillingDocumentBase(models.Model):
     )
 
     kind = models.CharField(get_billing_documents_kinds, max_length=8, db_index=True)
-    related_document = models.ForeignKey('self', blank=True, null=True,
+    related_document = models.ForeignKey('self', blank=True, null=True, on_delete=models.SET_NULL,
                                          related_name='reverse_related_document')
 
     series = models.CharField(max_length=20, blank=True, null=True,
                               db_index=True)
     number = models.IntegerField(blank=True, null=True, db_index=True)
-    customer = models.ForeignKey('Customer')
-    provider = models.ForeignKey('Provider')
+    customer = models.ForeignKey('Customer', on_delete=models.CASCADE)
+    provider = models.ForeignKey('Provider', on_delete=models.CASCADE)
     archived_customer = JSONField(default=dict, null=True, blank=True)
     archived_provider = JSONField(default=dict, null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
@@ -159,7 +160,7 @@ class BillingDocumentBase(models.Model):
         help_text='Date of the transaction exchange rate.'
     )
 
-    pdf = ForeignKey(PDF, null=True)
+    pdf = ForeignKey(PDF, null=True, blank=True, on_delete=models.SET_NULL)
     state = FSMField(choices=STATE_CHOICES, max_length=10, default=STATES.DRAFT,
                      verbose_name="State",
                      help_text='The state the invoice is in.')
@@ -169,6 +170,8 @@ class BillingDocumentBase(models.Model):
     _total_in_transaction_currency = models.DecimalField(max_digits=19,
                                                          decimal_places=2,
                                                          null=True, blank=True)
+
+    is_storno = models.BooleanField(default=False)
 
     _last_state = None
     _document_entries = None
@@ -226,11 +229,12 @@ class BillingDocumentBase(models.Model):
 
             self.transaction_xe_rate = xe_rate
 
-        if due_date:
-            self.due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
-        elif not self.due_date and not due_date:
-            delta = timedelta(days=PAYMENT_DUE_DAYS)
-            self.due_date = timezone.now().date() + delta
+        if not self.is_storno:
+            if due_date:
+                self.due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
+            elif not self.due_date and not due_date:
+                delta = timedelta(days=PAYMENT_DUE_DAYS)
+                self.due_date = timezone.now().date() + delta
 
         if not self.sales_tax_name:
             self.sales_tax_name = self.customer.sales_tax_name
@@ -269,6 +273,9 @@ class BillingDocumentBase(models.Model):
         self._cancel(cancel_date=cancel_date)
 
     def sync_related_document_state(self):
+        if self.is_storno:
+            return
+
         if self.related_document and self.state != self.related_document.state:
             state_transition_map = {
                 BillingDocumentBase.STATES.ISSUED: 'issue',
@@ -326,14 +333,14 @@ class BillingDocumentBase(models.Model):
         # If it's in paid state => don't allow any changes
         if self._last_state == self.STATES.PAID:
             msg = 'You cannot edit the document once it is in paid state.'
-            raise ValidationError({NON_FIELD_ERRORS: msg})
+            raise ValidationError(msg)
 
         if self.transactions.exclude(currency=self.transaction_currency).exists():
             message = 'There are unfinished transactions of this document that use a ' \
                       'different currency.'
             raise ValidationError({'transaction_currency': message})
 
-    def save(self, *args, **kwargs):
+    def clean_defaults(self):
         if not self.transaction_currency:
             self.transaction_currency = self.customer.currency or self.currency
 
@@ -349,6 +356,11 @@ class BillingDocumentBase(models.Model):
             self.sales_tax_name = self.customer.sales_tax_name
         if not self.sales_tax_percent:
             self.sales_tax_percent = self.customer.sales_tax_percent
+
+    def save(self, *args, **kwargs):
+        # ToDo: Use AutoCleanModelMixin for this class and move clean_defaults() call
+        # to full_clean
+        self.clean_defaults()
 
         self._last_state = self.state
 
@@ -543,6 +555,7 @@ class BillingDocumentBase(models.Model):
         return sum([entry.tax_value for entry in self.entries])
 
     @property
+    @require_transaction_currency_and_xe_rate
     def total_in_transaction_currency(self):
         if self._total_in_transaction_currency is not None:
             return self._total_in_transaction_currency
@@ -551,16 +564,19 @@ class BillingDocumentBase(models.Model):
                     for entry in self.entries])
 
     @property
+    @require_transaction_currency_and_xe_rate
     def total_before_tax_in_transaction_currency(self):
         return sum([entry.total_before_tax_in_transaction_currency
                     for entry in self.entries])
 
     @property
+    @require_transaction_currency_and_xe_rate
     def tax_value_in_transaction_currency(self):
         return sum([entry.tax_value_in_transaction_currency
                     for entry in self.entries])
 
     @property
+    @require_transaction_currency_and_xe_rate
     def amount_paid_in_transaction_currency(self):
         Transaction = apps.get_model('silver.Transaction')
 
@@ -568,6 +584,7 @@ class BillingDocumentBase(models.Model):
                     for transaction in self.transactions.filter(state=Transaction.States.Settled)])
 
     @property
+    @require_transaction_currency_and_xe_rate
     def amount_pending_in_transaction_currency(self):
         Transaction = apps.get_model('silver.Transaction')
 
@@ -575,6 +592,7 @@ class BillingDocumentBase(models.Model):
                     for transaction in self.transactions.filter(state=Transaction.States.Pending)])
 
     @property
+    @require_transaction_currency_and_xe_rate
     def amount_to_be_charged_in_transaction_currency(self):
         Transaction = apps.get_model('silver.Transaction')
 

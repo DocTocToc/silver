@@ -14,16 +14,17 @@
 
 from __future__ import absolute_import
 
-from django_fsm import TransitionNotAllowed, transition
+from django_fsm import transition
 
 from django.apps import apps
-from django.db import models
+from django.db import transaction
 from django.db.models.signals import pre_delete, post_save
 from django.dispatch import receiver
 
 from silver.models.documents.base import (
     BillingDocumentBase, BillingDocumentManager, BillingDocumentQuerySet
 )
+from silver.models.documents.entries import DocumentEntry
 from silver.models.billing_entities import Provider
 
 
@@ -55,7 +56,7 @@ class Invoice(BillingDocumentBase):
     @transition(field='state', source=BillingDocumentBase.STATES.DRAFT,
                 target=BillingDocumentBase.STATES.ISSUED)
     def issue(self, issue_date=None, due_date=None):
-        self.archived_provider = self.provider.get_invoice_archivable_field_values()
+        self.archived_provider = self.provider.get_archivable_field_values()
 
         super(Invoice, self)._issue(issue_date, due_date)
 
@@ -74,6 +75,43 @@ class Invoice(BillingDocumentBase):
     def entries(self):
         return self.invoice_entries.all()
 
+    def create_storno(self):
+        if self.is_storno:
+            raise ValueError("This invoice is already a storno one.")
+
+        if self.state not in [self.STATES.CANCELED, self.STATES.PAID]:
+            raise ValueError(
+                "The invoice state must either be canceled or paid in order to create a storno."
+            )
+
+        with transaction.atomic():
+            storno_invoice = Invoice.objects.create(
+                related_document=self,
+                provider=self.provider,
+                customer=self.customer,
+                is_storno=True,
+                sales_tax_name=self.sales_tax_name,
+                sales_tax_percent=self.sales_tax_percent,
+                currency=self.currency,
+                transaction_currency=self.transaction_currency,
+            )
+            storno_invoice.invoice_entries.add(*[DocumentEntry.objects.create(
+                unit_price=entry.unit_price,
+                unit=entry.unit,
+                quantity=entry.quantity * -1,
+                product_code=entry.product_code,
+                start_date=entry.start_date,
+                end_date=entry.end_date,
+                prorated=entry.prorated,
+                invoice=storno_invoice,
+            ) for entry in self.entries])
+
+            return storno_invoice
+
+    @property
+    def proforma(self):
+        return self.related_document
+
 
 @receiver(pre_delete, sender=Invoice)
 def delete_invoice_pdf_from_storage(sender, instance, **kwargs):
@@ -88,8 +126,11 @@ def post_invoice_save(sender, instance, created=False, **kwargs):
         return
 
     Transaction = apps.get_model('silver.Transaction')
+    BillingLog = apps.get_model('silver.BillingLog')
+
     invoice = instance
     proforma = invoice.related_document
 
     if proforma:
         Transaction.objects.filter(proforma=proforma).update(invoice=invoice)
+        BillingLog.objects.filter(proforma=proforma).update(invoice=invoice)

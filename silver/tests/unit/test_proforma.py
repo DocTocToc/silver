@@ -18,10 +18,11 @@ from decimal import Decimal
 
 from six.moves import zip
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from silver.models import DocumentEntry, Invoice, Proforma
-from silver.tests.factories import (
+from silver.fixtures.factories import (
     ProformaFactory, DocumentEntryFactory, CustomerFactory
 )
 
@@ -155,3 +156,8 @@ class TestProforma(TestCase):
                                           transaction_currency=None)
 
         self.assertEqual(proforma.transaction_currency, 'EUR')
+
+    def test_proforma_is_storno_not_allowed(self):
+        proforma = ProformaFactory.create(is_storno=True)
+
+        self.assertRaises(ValidationError, proforma.clean)

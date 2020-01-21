@@ -15,18 +15,18 @@
 from __future__ import absolute_import
 
 from itertools import cycle
-from mock import MagicMock, patch
+from mock import MagicMock, patch, Mock
 
 from django_fsm import TransitionNotAllowed
 
 from django.contrib.admin.models import CHANGE
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.test import TestCase, Client
 from django.utils.encoding import force_text
 
-from silver.tests.factories import InvoiceFactory
+from silver.fixtures.factories import InvoiceFactory
 
 
 class InvoiceAdminTestCase(TestCase):
@@ -46,18 +46,19 @@ class InvoiceAdminTestCase(TestCase):
         mock_log_action = MagicMock()
         mock_log_entry.objects.log_action = mock_log_action
 
-        mock_action = MagicMock(return_value=MagicMock(series_number='aaa'))
+        mock_action = Mock(return_value=Mock(series_number='aaa', admin_change_url="result_url"))
 
         mock_invoice = MagicMock()
         mock_invoice.issue = mock_action
         mock_invoice.cancel = mock_action
         mock_invoice.pay = mock_action
         mock_invoice.clone_into_draft = mock_action
+        mock_invoice.create_storno = mock_action
 
         with patch.multiple('silver.admin',
                             LogEntry=mock_log_entry,
                             Invoice=mock_invoice):
-            actions = ['issue', 'pay', 'cancel', 'clone']
+            actions = ['issue', 'pay', 'cancel', 'clone', 'create_storno']
 
             for action in actions:
                 self.admin.post(url, {

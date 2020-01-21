@@ -12,6 +12,7 @@ pipeline:
     commands:
       - make dependencies
       - pip install -U "Django${DJANGO_VERSION}"
+      - if [ -n "$DJANGO_FILTER_VERSION" ]; then pip install django-filter$DJANGO_FILTER_VERSION; fi
       - mkdir /var/log/silver
       - make lint
       - make test
@@ -28,17 +29,19 @@ pipeline:
     when:
       event: [push, tag]
 
-  trigger:
+  trigger-docs-build:
     image: plugins/downstream
     server: https://drone.presslabs.net
     fork: true
-    wait: true
-    secrets: [ DRONE_TOKEN ]
+    secrets: [DRONE_TOKEN]
     repositories:
-      - presslabs/code
+      - presslabs/docs
     when:
       branch: master
       event: push
+      matrix:
+        PYTHON_VERSION: 3.6
+        DJANGO_VERSION: ">2.2,<2.3"
 
 services:
   mysql:
@@ -52,9 +55,19 @@ services:
     image: redis:3-alpine
 
 matrix:
-  DJANGO_VERSION:
-    - <2.0
-  PYTHON_VERSION:
-    - 2.7
-    - 3.5
-    - 3.6
+  include:
+    - PYTHON_VERSION: 2.7
+      DJANGO_VERSION: ">=1.11,<2.0"
+      DJANGO_FILTER_VERSION: "==1.1"
+    - PYTHON_VERSION: 3.5
+      DJANGO_VERSION: ">=2.0,<2.1"
+    - PYTHON_VERSION: 3.5
+      DJANGO_VERSION: ">2.1,<2.2"
+    - PYTHON_VERSION: 3.5
+      DJANGO_VERSION: ">2.2,<2.3"
+    - PYTHON_VERSION: 3.6
+      DJANGO_VERSION: ">=2.0,<2.1"
+    - PYTHON_VERSION: 3.6
+      DJANGO_VERSION: ">2.1,<2.2"
+    - PYTHON_VERSION: 3.6
+      DJANGO_VERSION: ">2.2,<2.3"
