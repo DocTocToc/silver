@@ -141,6 +141,8 @@ MIDDLEWARE = [
 
 SECRET_KEY = 'secret'
 
+SILVER_REST = True
+
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
