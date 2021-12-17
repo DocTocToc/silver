@@ -1,20 +1,14 @@
 ---
 title: Payments in Silver
-description: An overview of what is a Payment in Silver, listing a customer's payments or retrieving a specific one, as well as creating and transitioning one.
 linktitle: Payments
-categories: [silver]
+description: An overview of what is a Payment in Silver, listing a customer's payments or retrieving a specific one, as well as creating and transitioning one.
 keywords: [silver]
 menu:
-  docs:
+  global:
     parent: "payments"
-weight: 1
-draft: false
-aliases: []
-toc: true
-related: true
 ---
 
-For resource definition check out the [Resources](../resources.md) page.
+For resource definition check out the [Resources](../silver-resources.md) page.
 
 ## List a Customer's Payments
 

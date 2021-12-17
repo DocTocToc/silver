@@ -62,7 +62,7 @@ def read(fname):
 
 setup(
     name="django-silver",
-    version='0.10.1',
+    version='0.11.1',
     description=read('DESCRIPTION'),
     long_description=read('README.rst'),
     license='Apache 2.0',
@@ -77,15 +77,14 @@ setup(
     },
     include_package_data=True,
     install_requires=install_requires,
+    entry_points={"pytest11": ["django-silver = silver.fixtures.pytest_fixtures"]},
     classifiers=[
         'Environment :: Web Environment',
-        'Framework :: Django :: 1.11',
-        'Framework :: Django :: 2.1',
-        'Framework :: Django :: 2.2',
+        'Framework :: Django :: 3.1',
+        'Framework :: Django :: 3.2',
         'Development Status :: 5 - Production/Stable',
         'License :: OSI Approved :: Apache Software License',
-        'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6'
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8'
     ]
 )

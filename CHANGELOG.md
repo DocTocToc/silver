@@ -1,14 +1,38 @@
 # Changelog
 
+
 ## Unrealeased changes
-_Nothing yet_
-## 0.10.1
-Fixed issue in autocomplete views where user.is_authenticated is no longer a function call and instead an attribute 
+- Fixed a race condition when paying invoices.
+
+## 0.11.1 (2021-06-29)
+
+### Tests
+- Expose django-silver as a pytest plugin to fix tests when installed as package. Fixtures wouldn't be detected otherwise.
+
+
+## 0.11 (2021-06-28)
+
+### Dependencies
+- Added Python>=3.7,<3.9 and Django>3.1,<3.3 support. Older versions are dropped. **(BREAKING)**
+- Bumped some other dependencies versions.
+
+### REST API
+- Proforma API fields `archived_provider` and `archived_customer` now correctly return JSON objects rather than 
+  stringified JSON objects
+
+### Library API
+- PaymentMethod `encrypt_data` and `decrypt_data` methods are now type hinted. **(WARNING)**. `decrypt_data` will 
+  no longer catches `InvalidToken` exception and returns `None`, but will instead let the exception pass.
+
+
+## 0.10.1 (UNRELEASED)
+- Fixed issue in autocomplete views where user.is_authenticated is no longer a function call and instead an attribute 
+
 
 ## 0.10 (2019-09-03)
 Some of these changes are considered to be breaking and were marked with **(BREAKING)**
 
-### API
+### REST API
 - `Invoice` and `Proforma` fields `archived_provider` and `archived_customer` are now represented
   as JSON instead of a string. **(BREAKING)**
 - Decimal numbers are now always properly typed as string. **(BREAKING)**

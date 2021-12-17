@@ -1,20 +1,14 @@
 ---
 title: Proformas in Silver
-description: Detailed explanations of what is a Proforma in Silver, how to create, delete and update one, as well as how to add entries. Also, it is explained the process of issuing and paying proformas.
 linktitle: Proformas
-categories: [silver]
+description: Detailed explanations of what is a Proforma in Silver, how to create, delete and update one, as well as how to add entries. Also, it is explained the process of issuing and paying proformas.
 keywords: [silver]
 menu:
-  docs:
+  global:
     parent: "billing-documents"
-weight: 1
-draft: false
-aliases: []
-toc: true
-related: true
 ---
 
-For resource definition check out the [Resources](../resources.md) page.
+For resource definition check out the [Resources](../silver-resources.md) page.
 
 ## List all proformas
 

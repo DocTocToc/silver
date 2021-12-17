@@ -14,12 +14,16 @@
 
 from __future__ import absolute_import
 
+import threading
 from decimal import Decimal
 
+import time
+from django.db import transaction, connection
+from django_fsm import TransitionNotAllowed
 from six.moves import zip
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TransactionTestCase
 
 from silver.models import DocumentEntry, Invoice, Proforma
 from silver.fixtures.factories import (
@@ -27,7 +31,7 @@ from silver.fixtures.factories import (
 )
 
 
-class TestProforma(TestCase):
+class TestProforma(TransactionTestCase):
     def test_pay_proforma_related_invoice_state_change_to_paid(self):
         proforma = ProformaFactory.create()
         proforma.issue()
@@ -37,6 +41,45 @@ class TestProforma(TestCase):
 
         assert proforma.related_document.state == Invoice.STATES.PAID
         assert proforma.state == Invoice.STATES.PAID
+
+    def test_pay_proforma_with_no_related_invoice_race_condition(self):
+        if connection.vendor == "sqlite":
+            self.skipTest("select_for_update is ignored when using sqlite")
+
+        proforma = ProformaFactory.create()
+        proforma.issue()
+
+        proforma_alternate = Proforma.objects.get(id=proforma.id)
+
+        exceptions_thread_2 = []
+
+        def pay_thread_2(proforma_alternate):
+            time.sleep(1.0)
+            try:
+                proforma_alternate.pay()
+            except Exception as e:
+                exceptions_thread_2.append(e)
+
+        t2 = threading.Thread(target=pay_thread_2, args=[proforma_alternate])
+
+        t2.start()
+
+        with transaction.atomic():
+            proforma.pay()
+            time.sleep(2.0)
+
+        t2.join()
+
+        assert len(exceptions_thread_2) == 1
+        assert isinstance(exceptions_thread_2[0], TransitionNotAllowed)
+
+        proforma = Proforma.objects.get(id=proforma.id)
+        assert proforma.state == Proforma.STATES.PAID
+
+        assert proforma.related_document is not None
+        assert proforma.related_document.state == Invoice.STATES.PAID
+
+        assert Invoice.objects.filter(related_document=proforma).count() == 1
 
     def test_clone_proforma_into_draft(self):
         proforma = ProformaFactory.create()

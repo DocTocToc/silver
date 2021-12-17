@@ -18,15 +18,16 @@ import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from annoying.fields import JSONField
-from django_fsm import FSMField, transition, TransitionNotAllowed, post_transition
+from django_fsm import FSMField, TransitionNotAllowed, post_transition
 from model_utils import Choices
 
 from django.apps import apps
+from django.db.models import JSONField
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.conf import settings
 from django.core.exceptions import ValidationError, NON_FIELD_ERRORS
+from django.core.serializers.json import DjangoJSONEncoder
 from django.urls import reverse
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -34,9 +35,10 @@ from django.db import transaction as db_transaction
 from django.db.models import Max, ForeignKey, F
 from django.template.loader import select_template
 from django.utils import timezone
-from django.utils.encoding import python_2_unicode_compatible, force_text
+from django.utils.encoding import force_str
+from django.utils.safestring import mark_safe
 from django.utils.text import slugify
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.utils.module_loading import import_string
 
 from silver.currencies import CurrencyConverter, RateNotFound
@@ -45,7 +47,7 @@ from silver.models.documents.entries import DocumentEntry
 from silver.models.documents.pdf import PDF
 from silver.utils.decorators import require_transaction_currency_and_xe_rate
 from silver.utils.international import currencies
-
+from silver.utils.transition import transactional_transition
 
 _storage = getattr(settings, 'SILVER_DOCUMENT_STORAGE', None)
 if _storage:
@@ -59,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 def documents_pdf_path(document, filename):
     path = '{prefix}{company}/{doc_name}/{date}/{filename}'.format(
-        company=slugify(force_text(
+        company=slugify(force_str(
             document.provider.company or document.provider.name)),
         date=document.issue_date.strftime('%Y/%m'),
         doc_name=('%ss' % document.__class__.__name__).lower(),
@@ -106,7 +108,6 @@ def get_billing_documents_kinds():
             for subclass in BillingDocumentBase.__subclasses__())
 
 
-@python_2_unicode_compatible
 class BillingDocumentBase(models.Model):
     objects = BillingDocumentManager.from_queryset(BillingDocumentQuerySet)()
 
@@ -132,8 +133,8 @@ class BillingDocumentBase(models.Model):
     number = models.IntegerField(blank=True, null=True, db_index=True)
     customer = models.ForeignKey('Customer', on_delete=models.CASCADE)
     provider = models.ForeignKey('Provider', on_delete=models.CASCADE)
-    archived_customer = JSONField(default=dict, null=True, blank=True)
-    archived_provider = JSONField(default=dict, null=True, blank=True)
+    archived_customer = JSONField(default=dict, null=True, blank=True, encoder=DjangoJSONEncoder)
+    archived_provider = JSONField(default=dict, null=True, blank=True, encoder=DjangoJSONEncoder)
     due_date = models.DateField(null=True, blank=True)
     issue_date = models.DateField(null=True, blank=True, db_index=True)
     paid_date = models.DateField(null=True, blank=True)
@@ -248,8 +249,12 @@ class BillingDocumentBase(models.Model):
         self._total = self.compute_total()
         self._total_in_transaction_currency = self.compute_total_in_transaction_currency()
 
-    @transition(field=state, source=STATES.DRAFT, target=STATES.ISSUED)
+    @transactional_transition(field=state, source=STATES.DRAFT, target=STATES.ISSUED)
     def issue(self, issue_date=None, due_date=None):
+        locked_self = self.__class__.objects.filter(id=self.id).select_for_update().first()
+        if locked_self.state != BillingDocumentBase.STATES.DRAFT:
+            raise TransitionNotAllowed
+
         self._issue(issue_date=issue_date, due_date=due_date)
 
     def _pay(self, paid_date=None):
@@ -258,9 +263,13 @@ class BillingDocumentBase(models.Model):
         if not self.paid_date and not paid_date:
             self.paid_date = timezone.now().date()
 
-    @transition(field=state, source=STATES.ISSUED, target=STATES.PAID)
+    @transactional_transition(field=state, source=STATES.ISSUED, target=STATES.PAID)
     def pay(self, paid_date=None):
-        self._pay(paid_date=paid_date)
+        locked_self = self.__class__.objects.filter(id=self.id).select_for_update().first()
+        if locked_self.state != BillingDocumentBase.STATES.ISSUED:
+            raise TransitionNotAllowed
+
+        self._pay(paid_date)
 
     def _cancel(self, cancel_date=None):
         if cancel_date:
@@ -268,15 +277,28 @@ class BillingDocumentBase(models.Model):
         if not self.cancel_date and not cancel_date:
             self.cancel_date = timezone.now().date()
 
-    @transition(field=state, source=STATES.ISSUED, target=STATES.CANCELED)
+    @transactional_transition(field=state, source=STATES.ISSUED, target=STATES.CANCELED)
     def cancel(self, cancel_date=None):
+        locked_self = self.__class__.objects.filter(id=self.id).select_for_update().first()
+        if locked_self.state != BillingDocumentBase.STATES.ISSUED:
+            raise TransitionNotAllowed
+
         self._cancel(cancel_date=cancel_date)
 
     def sync_related_document_state(self):
         if self.is_storno:
             return
 
-        if self.related_document and self.state != self.related_document.state:
+        if not self.related_document:
+            return
+
+        if self.related_document.is_storno:
+            return
+
+        if self.related_document.state == BillingDocumentBase.STATES.PAID:
+            return
+
+        if self.state != self.related_document.state:
             state_transition_map = {
                 BillingDocumentBase.STATES.ISSUED: 'issue',
                 BillingDocumentBase.STATES.CANCELED: 'cancel',
@@ -428,8 +450,8 @@ class BillingDocumentBase(models.Model):
             app_label=self._meta.app_label,
             klass=self.__class__.__name__.lower())
         url = reverse(url_base, args=(self.pk,))
-        return '<a href="{url}">{display_series}</a>'.format(
-            url=url, display_series=self.series_number)
+        return mark_safe('<a href="{url}">{display_series}</a>'.format(
+            url=url, display_series=self.series_number))
 
     @property
     def _entries(self):
@@ -500,7 +522,7 @@ class BillingDocumentBase(models.Model):
             'filename': self.get_pdf_filename(),
             'provider': self.provider.slug,
             'customer': self.customer.slug,
-            'issue_date': self.issue_date.strftime('%Y/%m/%d')
+            'issue_date': self.issue_date.strftime('%Y/%m/%d') if self.issue_date else "draft"
         }
 
         return path_template.format(**context)

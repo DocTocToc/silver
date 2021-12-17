@@ -14,11 +14,13 @@
 
 from __future__ import absolute_import, unicode_literals
 
+from typing import Union
+
 from itertools import chain
 
-from annoying.fields import JSONField
 from annoying.functions import get_object_or_None
 from cryptography.fernet import InvalidToken, Fernet
+from django.core.serializers.json import DjangoJSONEncoder
 from django_fsm import TransitionNotAllowed
 from model_utils.managers import InheritanceManager
 
@@ -28,7 +30,6 @@ from django.db import models
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
-from django.utils.encoding import python_2_unicode_compatible
 
 from silver import payment_processors
 from silver.models import Invoice, Proforma
@@ -40,7 +41,6 @@ class PaymentMethodInvalid(Exception):
     pass
 
 
-@python_2_unicode_compatible
 class PaymentMethod(models.Model):
     class PaymentProcessors:
         @classmethod
@@ -56,7 +56,7 @@ class PaymentMethod(models.Model):
                                          blank=False, null=False, max_length=256)
     customer = models.ForeignKey(Customer, models.CASCADE)
     added_at = models.DateTimeField(default=timezone.now)
-    data = JSONField(blank=True, null=True, default={})
+    data = models.JSONField(blank=True, null=True, default=dict, encoder=DjangoJSONEncoder)
 
     verified = models.BooleanField(default=False)
     canceled = models.BooleanField(default=False)
@@ -102,17 +102,23 @@ class PaymentMethod(models.Model):
 
         super(PaymentMethod, self).delete(using=using)
 
-    def encrypt_data(self, data):
-        key = settings.PAYMENT_METHOD_SECRET
-        return Fernet(key).encrypt(bytes(data))
+    def encrypt_data(self, data: Union[str, bytes]) -> str:
+        if isinstance(data, str):
+            data = data.encode(encoding="utf-8")
 
-    def decrypt_data(self, crypted_data):
+        key = settings.PAYMENT_METHOD_SECRET
+        return Fernet(key).encrypt(data).decode('utf-8')
+
+    def decrypt_data(self, crypted_data: Union[str, bytes]) -> str:
+        if not crypted_data:
+            return ""
+
+        if isinstance(crypted_data, str):
+            crypted_data = crypted_data.encode(encoding="utf-8")
+
         key = settings.PAYMENT_METHOD_SECRET
 
-        try:
-            return str(Fernet(key).decrypt(bytes(crypted_data)))
-        except InvalidToken:
-            return None
+        return Fernet(key).decrypt(crypted_data).decode("utf-8")
 
     def cancel(self):
         if self.canceled:

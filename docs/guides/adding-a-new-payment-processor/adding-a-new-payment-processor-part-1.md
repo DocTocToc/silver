@@ -1,17 +1,11 @@
 ---
 title:  Part 1 - Create the payment processor and payment method
+linktitle: Part 1
 description: The first part of this tutorial will show you how to add a new payment processor to your app, details about its structure and how to implement a payment method class.
-linktitle: Part 1 - Create the payment processor and payment method
-categories: [silver]
 keywords: [silver]
 menu:
-  docs:
+  global:
     parent: "adding-a-new-payment-processor"
-weight: 1
-draft: false
-aliases: []
-toc: true
-related: true
 ---
 
 ## Getting started
@@ -109,7 +103,7 @@ payment_processor
 
 In `payment_processors.py` you will create your Payment Processor class. You should inherit
 the PaymentProcessorBase class and a mixin class based on what type of your Payment Processor will be.
-For more info, you should read the [payment processor resource definition](../resources.md#payment-processor).
+For more info, you should read the [payment processor resource definition](../../silver-resources.md#payment-processor).
 
 We are going to "partially implement" a `triggered` Payment Processor.
 That means the Transactions (payments) will be triggered from within Silver, and their status will
