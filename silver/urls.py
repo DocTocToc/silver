@@ -24,7 +24,8 @@ from django.conf import settings
 from silver.views import (pay_transaction_view, complete_payment_view,
                           InvoiceAutocomplete, ProformaAutocomplete,
                           PaymentMethodAutocomplete, PlanAutocomplete,
-                          CustomerAutocomplete, ProviderAutocomplete)
+                          CustomerAutocomplete, ProviderAutocomplete,
+                          invoice_pdf, proforma_pdf,)
 
 
 admin.autodiscover()
@@ -50,6 +51,11 @@ urlpatterns = [
             CustomerAutocomplete.as_view(), name='autocomplete-customer'),
     re_path(r'^autocomplete/provider/$',
             ProviderAutocomplete.as_view(), name='autocomplete-provider'),
+
+    re_path(r'^invoices/(?P<invoice_id>\d+).pdf$',
+            invoice_pdf, name='invoice-pdf'),
+    re_path(r'^proformas/(?P<proforma_id>\d+).pdf$',
+            proforma_pdf, name='proforma-pdf'),
 ]
 
 api_urlpatterns = [

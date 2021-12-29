@@ -16,7 +16,6 @@ from __future__ import absolute_import
 
 from django.conf.urls import re_path
 
-from silver import views as silver_views
 from silver.api.views import billing_entities_views, documents_views, payment_method_views, \
     plan_views, product_code_views, subscription_views, transaction_views
 
@@ -91,8 +90,6 @@ urlpatterns = [
             documents_views.InvoiceEntryUpdateDestroy.as_view(), name='invoice-entry-update'),
     re_path(r'^invoices/(?P<pk>[0-9]+)/state/$',
             documents_views.InvoiceStateHandler.as_view(), name='invoice-state'),
-    re_path(r'^invoices/(?P<invoice_id>\d+).pdf$',
-            silver_views.invoice_pdf, name='invoice-pdf'),
 
     re_path(r'^proformas/$',
             documents_views.ProformaListCreate.as_view(), name='proforma-list'),
@@ -108,8 +105,6 @@ urlpatterns = [
     re_path(r'^proformas/(?P<pk>[0-9]+)/invoice/$',
             documents_views.ProformaInvoiceRetrieveCreate.as_view(),
             name='proforma-invoice'),
-    re_path(r'^proformas/(?P<proforma_id>\d+).pdf$',
-            silver_views.proforma_pdf, name='proforma-pdf'),
     re_path(r'^pdfs/(?P<pdf_pk>[0-9]+)/$',
             documents_views.PDFRetrieve.as_view(),
             name='pdf'),
