@@ -14,7 +14,11 @@
 
 from __future__ import absolute_import, unicode_literals
 
+import datetime as dt
+from dataclasses import dataclass
+
 from decimal import Decimal
+from enum import Enum
 
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -41,6 +45,19 @@ class DocumentEntry(models.Model):
     class Meta:
         verbose_name = 'Entry'
         verbose_name_plural = 'Entries'
+
+    def full_clean(self, *args, **kwargs):
+        quantized_unit_price = Decimal(self.unit_price).quantize(Decimal('0.0000'))
+
+        if self.unit_price == quantized_unit_price:
+            self.unit_price = quantized_unit_price
+
+        quantized_quantity = Decimal(self.quantity).quantize(Decimal('0.0000'))
+
+        if self.quantity == quantized_quantity:
+            self.quantity = quantized_quantity
+
+        super().full_clean(*args, **kwargs)
 
     @property
     def document(self):
@@ -130,3 +147,17 @@ class DocumentEntry(models.Model):
             quantity=self.quantity,
             product_code=self.product_code
         )
+
+
+class OriginType(str, Enum):
+    Plan = "plan"
+    MeteredFeature = "metered_feature"
+
+
+@dataclass(frozen=True, eq=True)
+class EntryInfo:
+    start_date: dt.date
+    end_date: dt.date
+    origin_type: OriginType
+    subscription: "silver.models.Subscription"
+    amount: Decimal
