@@ -1,4 +1,4 @@
-FROM python:3.7-alpine
+FROM python:3.9-alpine
 MAINTAINER Presslabs ping@presslabs.com
 
 # Ensure that Python outputs everything that's printed inside
@@ -20,6 +20,7 @@ COPY ./requirements /silver/requirements
 RUN set -ex \
     && apk update \
     && apk add --no-cache \
+        freetype-dev \
         mariadb-client \
         libjpeg-turbo \
         jpeg \

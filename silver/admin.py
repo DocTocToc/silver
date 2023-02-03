@@ -24,6 +24,7 @@ from decimal import Decimal
 import requests
 from PyPDF2 import PdfFileReader, PdfFileMerger
 from dal import autocomplete
+from django.contrib.admin.utils import model_ngettext
 from django_fsm import TransitionNotAllowed
 from furl import furl
 
@@ -53,9 +54,10 @@ from silver.models import (
     Plan, MeteredFeature, Subscription, Customer, Provider,
     MeteredFeatureUnitsLog, Invoice, DocumentEntry,
     ProductCode, Proforma, BillingLog, BillingDocumentBase,
-    Transaction, PaymentMethod
+    Transaction, PaymentMethod, Discount
 )
 from silver.payment_processors.mixins import PaymentProcessorTypes
+from silver.utils.admin import get_admin_url
 from silver.utils.international import currencies
 from silver.utils.payments import get_payment_url
 
@@ -108,7 +110,9 @@ class PlanForm(forms.ModelForm):
         model = Plan
         fields = ('provider', 'name', 'product_code', 'interval',
                   'interval_count', 'amount', 'currency', 'trial_period_days',
-                  'generate_documents_on_trial_end', 'separate_cycles_during_trial', 'prebill_plan',
+                  'generate_documents_on_trial_end', 'separate_cycles_during_trial',
+                  'separate_plan_entries_per_base_interval', 'prebill_plan',
+                  'only_bill_metered_features_with_base_amount',
                   'cycle_billing_duration', 'generate_after', 'metered_features', 'enabled',
                   'private')
 
@@ -124,6 +128,57 @@ class PlanAdmin(ModelAdmin):
     search_fields = ['name']
     list_filter = ['provider']
     form = PlanForm
+    fieldsets = (
+        (
+            "Plan Identity",
+            {
+                "fields": (
+                    ("provider",),
+                    ("name", "product_code"),
+                )
+            },
+        ),
+        (
+            "Charges",
+            {
+                "fields": (
+                    ("amount", "currency"),
+                    ("interval", "interval_count",),
+                    ("trial_period_days",),
+                    ("prebill_plan",),
+                )
+            }
+        ),
+        (
+            "Metered Features (extra charges)",
+            {
+                "fields": (
+                    ("metered_features",),
+                    ("alternative_metered_features_interval", "alternative_metered_features_interval_count"),
+                    ("only_bill_metered_features_with_base_amount",),
+                )
+            }
+        ),
+        (
+            "Billing Documents",
+            {
+                "fields": (
+                    ("separate_plan_entries_per_base_interval"),
+                    ("generate_documents_on_trial_end", "separate_cycles_during_trial"),
+                    ("cycle_billing_duration", "generate_after",),
+                )
+            }
+        ),
+        (
+            "Manage",
+            {
+                "fields": (
+                    ("enabled",),
+                    ("private",),
+                )
+            },
+        ),
+    )
 
     def interval_display(self, obj):
         return ('{:d} {}s'.format(obj.interval_count, obj.interval)
@@ -165,7 +220,7 @@ class PlanAdmin(ModelAdmin):
 class MeteredFeatureUnitsLogInLine(TabularInline):
     model = MeteredFeatureUnitsLog
     list_display = ['metered_feature']
-    readonly_fields = ('start_date', 'end_date',)
+    fields = ['metered_feature', 'annotation', 'consumed_units', 'start_datetime', 'end_datetime']
     extra = 0
 
     def get_formset(self, request, obj=None, **kwargs):
@@ -190,14 +245,11 @@ class BillingLogInLine(TabularInline):
     model = BillingLog
     fields = ['billing_date', 'plan_billed_up_to', 'metered_features_billed_up_to',
               'created_at', 'proforma_link', 'invoice_link']
-    readonly_fields = fields
+    readonly_fields = ['created_at', 'proforma_link', 'invoice_link']
     verbose_name = 'Automatic billing log'
     verbose_name_plural = verbose_name
 
     def has_add_permission(self, request, obj):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
         return False
 
     def invoice_link(self, obj):
@@ -234,28 +286,42 @@ class PlanFilter(SimpleListFilter):
     parameter_name = 'plan'
 
     def lookups(self, request, model_admin):
-        queryset = model_admin.get_queryset(request).distinct() \
+        queryset = model_admin.get_queryset(request) \
             .annotate(
                 _name_provider=Concat(
                     F('plan__name'), Value(' ('), F('plan__provider__name'), Value(')'),
                     output_field=fields.CharField()
                 ),
         ) \
-            .values_list('id', '_name_provider') \
+            .values_list('plan__id', '_name_provider') \
             .distinct()
 
         return list(queryset)
 
     def queryset(self, request, queryset):
         if self.value():
-            return queryset.filter(invoice__exact=self.value())
+            return queryset.filter(plan__id=self.value())
+        return queryset
+
+
+class DiscountFilter(SimpleListFilter):
+    title = _('discount')
+    parameter_name = 'discount'
+
+    def lookups(self, request, model_admin):
+        return list(Discount.objects.all().values_list('id', 'name'))
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return Discount.objects.get(pk=self.value()).matching_subscriptions() & queryset
+
         return queryset
 
 
 class SubscriptionAdmin(ModelAdmin):
     list_display = ['customer', 'get_plan_name', 'last_billing_date', 'trial_end',
                     'start_date', 'ended_at', 'state', metadata]
-    list_filter = [PlanFilter, 'state', 'plan__provider', 'customer']
+    list_filter = [PlanFilter, 'state', 'plan__provider', 'customer', DiscountFilter]
     actions = ['activate', 'cancel_now', 'cancel_at_end_of_cycle', 'end']
     search_fields = ['customer__first_name', 'customer__last_name',
                      'customer__company', 'plan__name', 'meta']
@@ -713,6 +779,27 @@ class ProformaFilter(SimpleListFilter):
         return queryset
 
 
+class DiscountAdmin(ModelAdmin):
+    list_display = ["__str__", "get_amount_description", "get_matching_subscriptions"]
+    filter_horizontal = ["subscriptions", "customers", "plans"]
+
+    def get_matching_subscriptions(self, discount):
+        count = discount.matching_subscriptions().count()
+
+        return mark_safe(
+            f'<a href="{get_admin_url(Subscription, anchored=False)}?discount={discount.id}">'
+            f"{count} {model_ngettext(Subscription, count)}"
+            f"</a>"
+        )
+
+    get_matching_subscriptions.short_description = "Matching Subscriptions"
+
+    def get_amount_description(self, discount):
+        return discount.amount_description
+
+    get_amount_description.short_description = "Amount"
+
+
 class BillingDocumentAdmin(ModelAdmin):
     list_display = ['series_number', 'get_customer', 'state',
                     'get_provider', 'issue_date', 'due_date', 'paid_date',
@@ -728,7 +815,7 @@ class BillingDocumentAdmin(ModelAdmin):
     provider_search_fields = ['provider__{field}'.format(field=field)
                               for field in common_fields + ['name']]
     search_fields = (customer_search_fields + provider_search_fields +
-                     ['series', 'number', '_total', '_total_in_transaction_currency'])
+                     ['series', 'number', '_total', '_total_in_transaction_currency', 'id'])
 
     date_hierarchy = 'issue_date'
 
@@ -1222,7 +1309,6 @@ class TransactionAdmin(ModelAdmin):
         for transaction in queryset:
             try:
                 method(transaction)
-                transaction.save()
             except TransitionNotAllowed:
                 failed_count += 1
 
@@ -1358,5 +1444,6 @@ site.register(Customer, CustomerAdmin)
 site.register(Provider, ProviderAdmin)
 site.register(Invoice, InvoiceAdmin)
 site.register(Proforma, ProformaAdmin)
+site.register(Discount, DiscountAdmin)
 site.register(ProductCode)
 site.register(MeteredFeature)

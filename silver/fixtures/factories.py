@@ -26,7 +26,7 @@ from django.utils import timezone
 from silver.models import (Provider, Plan, MeteredFeature, Customer,
                            Subscription, Invoice, ProductCode, PDF,
                            Proforma, MeteredFeatureUnitsLog, DocumentEntry,
-                           Transaction, PaymentMethod, BillingLog)
+                           Transaction, PaymentMethod, BillingLog, Discount)
 from silver.fixtures.test_fixtures import manual_processor
 from silver.utils.dates import last_day_of_month, prev_month
 
@@ -63,6 +63,14 @@ class CustomerFactory(factory.django.DjangoModelFactory):
     sales_tax_percent = Decimal("1.00")
     sales_tax_name = factory.Sequence(lambda n: 'VAT')
     payment_due_days = 5
+
+
+class DiscountFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Discount
+
+    name = factory.Sequence(lambda n: "20% OFF " + faker.first_name())
+    percentage = Decimal("20.00")
 
 
 class MeteredFeatureFactory(factory.django.DjangoModelFactory):
@@ -107,7 +115,7 @@ class PlanFactory(factory.django.DjangoModelFactory):
 
     name = factory.Sequence(lambda n: faker.name())
     interval = Plan.INTERVALS.MONTH
-    interval_count = factory.Sequence(lambda n: n)
+    interval_count = factory.Sequence(lambda n: n + 1)
     amount = factory.Sequence(lambda n: n)
     currency = 'USD'
     generate_after = factory.Sequence(lambda n: n)
@@ -197,6 +205,9 @@ class InvoiceFactory(factory.django.DjangoModelFactory):
             self.archived_customer = self.customer.get_archivable_field_values()
             self.archived_provider = self.provider.get_archivable_field_values()
 
+            # avoid triggering a validation error
+            self.saved_state = self.current_state
+
             self.save()
 
 
@@ -246,6 +257,9 @@ class ProformaFactory(factory.django.DjangoModelFactory):
             self._total_in_transaction_currency = self.compute_total_in_transaction_currency()
             self.archived_customer = self.customer.get_archivable_field_values()
             self.archived_provider = self.provider.get_archivable_field_values()
+
+            # avoid triggering a validation error
+            self.saved_state = self.current_state
 
             self.save()
 
@@ -315,12 +329,18 @@ class TransactionFactory(factory.django.DjangoModelFactory):
             proforma.related_document = invoice
             if invoice:
                 proforma.transaction_currency = invoice.transaction_currency
+
+            # avoid triggering a validation error
+            proforma.saved_state = proforma.current_state
             proforma.save()
 
         if invoice:
             invoice.related_document = proforma
             if proforma:
                 invoice.transaction_currency = proforma.transaction_currency
+
+            # avoid triggering a validation error
+            invoice.saved_state = invoice.current_state
             invoice.save()
 
         return super(TransactionFactory, cls)._create(model_class, *args, **kwargs)

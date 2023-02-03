@@ -14,6 +14,7 @@
 
 from __future__ import absolute_import
 
+import datetime
 import threading
 from decimal import Decimal
 
@@ -41,6 +42,20 @@ class TestProforma(TransactionTestCase):
 
         assert proforma.related_document.state == Invoice.STATES.PAID
         assert proforma.state == Invoice.STATES.PAID
+
+    def test_pay_proforma_with_no_related_invoice_creates_invoice(self):
+        proforma = ProformaFactory.create()
+        proforma.customer.payment_due_days = 30
+        proforma.issue()
+
+        proforma.pay()
+
+        invoice = proforma.related_document
+
+        assert proforma.state == Invoice.STATES.PAID
+        assert invoice.state == Invoice.STATES.PAID
+        assert invoice.total == proforma.total
+        assert invoice.due_date - invoice.issue_date == datetime.timedelta(days=30)
 
     def test_pay_proforma_with_no_related_invoice_race_condition(self):
         if connection.vendor == "sqlite":
@@ -106,7 +121,6 @@ class TestProforma(TransactionTestCase):
         assert clone.provider == proforma.provider
 
         assert clone.currency == proforma.currency
-        assert clone._last_state == clone.state
         assert clone.pk != proforma.pk
         assert clone.id != proforma.id
         assert not clone.pdf
@@ -201,6 +215,4 @@ class TestProforma(TransactionTestCase):
         self.assertEqual(proforma.transaction_currency, 'EUR')
 
     def test_proforma_is_storno_not_allowed(self):
-        proforma = ProformaFactory.create(is_storno=True)
-
-        self.assertRaises(ValidationError, proforma.clean)
+        self.assertRaises(ValidationError, lambda: ProformaFactory.create(is_storno=True))

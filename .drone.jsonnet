@@ -89,7 +89,9 @@ local Pipeline(python_version, django_version) = {
                 "MYSQL_USER": "silver"
             },
             "command": [
-                "--character-set-server=utf8mb4"
+                "--character-set-server=utf8mb4",
+                "--collation-server=utf8mb4_unicode_ci",
+                "--default-storage-engine=InnoDB"
             ]
         },
         {
@@ -103,6 +105,8 @@ local Pipeline(python_version, django_version) = {
 [
     Pipeline("3.7", ">=3.1,<3.2"),
     Pipeline("3.8", ">=3.1,<3.2"),
+    Pipeline("3.9", ">=3.1,<3.2"),
     Pipeline("3.7", ">=3.2,<3.3"),
     Pipeline("3.8", ">=3.2,<3.3"),
+    Pipeline("3.9", ">=3.2,<3.3"),
 ]
