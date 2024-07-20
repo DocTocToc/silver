@@ -22,7 +22,7 @@ from datetime import date
 from decimal import Decimal
 
 import requests
-from PyPDF2 import PdfFileReader, PdfFileMerger
+from pypdf import PdfReader, PdfWriter
 from dal import autocomplete
 from django.contrib.admin.utils import model_ngettext
 from django_fsm import TransitionNotAllowed
@@ -63,6 +63,7 @@ from silver.utils.payments import get_payment_url
 
 logger = logging.getLogger('silver')
 
+merger = PdfWriter()
 
 def metadata(obj):
     d = u'(None)'
@@ -1016,12 +1017,12 @@ class BillingDocumentAdmin(ModelAdmin):
         )
 
         base_path = '/tmp'
-        merger = PdfFileMerger()
+        merger = PdfWriter()
         for document in queryset:
             if document.pdf:
                 local_file_path = self._download_pdf(document.pdf.url, base_path)
                 try:
-                    reader = PdfFileReader(open(local_file_path, 'rb'))
+                    reader = PdfReader(open(local_file_path, 'rb'))
                     merger.append(reader)
                     logging_ctx = {
                         'number': document.series_number,
