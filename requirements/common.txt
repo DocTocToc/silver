@@ -29,5 +29,5 @@ PyJWT>=2.7.0  # ------------------------------------------------------------- (b
 
 # Other
 furl>=1.2,<1.3  # (URL parsing and manipulation) NOT_LATEST -------------------- (bumped 2018-08-10)
-xhtml2pdf>=0.2,<0.3  # (PDF rendering, python-dev is required) ----------------- (bumped 2018-06-07)
+xhtml2pdf==0.2.16  # (PDF rendering, python-dev is required) ----------------- (bumped 2018-06-07)
 PyPDF2>=1.26,<2  # (PDF manipulation) ------------------------------------------ (bumped 2018-06-07)
