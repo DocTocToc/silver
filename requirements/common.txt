@@ -29,5 +29,5 @@ PyJWT>=2.7.0  # ------------------------------------------------------------- (b
 
 # Other
 furl>=1.2,<1.3  # (URL parsing and manipulation) NOT_LATEST -------------------- (bumped 2018-08-10)
-git+https://github.com/jeromecc/xhtml2pdf.git
+xhtml2pdf @ git+ssh://git@github.com/jeromecc/xhtml2pdf.git
 pypdf  # (PDF manipulation) ------------------------------------------ (bumped 2024-07-21)
